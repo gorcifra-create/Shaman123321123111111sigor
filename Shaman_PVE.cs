@@ -2623,29 +2623,15 @@ public class Main : ICustomClass
 		return false;
 	}
 
-	private bool HasActiveTotemOverride(uint tEarth, uint tFire, uint tWater, uint tAir)
-    {
-        uint num = ResolveSpell("tremor_totem");
-        uint num3 = ResolveSpell("mana_tide_totem");
-        uint num4 = ResolveSpell("cleansing_totem");
-        uint num5 = ResolveSpell("grounding_totem");
-        bool flag = num != 0 && tEarth != num && IsTotemSpellActive(2, num);
-        // Fire Elemental completely removed from base override!
-        bool flag3 = (num3 != 0 && tWater != num3 && IsTotemSpellActive(3, num3)) || (num4 != 0 && tWater != num4 && IsTotemSpellActive(3, num4));
-        bool flag4 = num5 != 0 && tAir != num5 && IsTotemSpellActive(4, num5);
-        return flag || flag3 || flag4;
-    }
-
-	
-    // ==========================================
-    // TOTEM MANAGER & CALL OF THE ELEMENTS
-    // ==========================================
-    
-    private string _lastTotemTrace = "";
-    private uint _nextTotemVerifyTime = 0;
-    private bool _wasMoving = false;
-
     private enum TotemMatchStatus { MISSING, WRONG, MATCH, NOT_REQUIRED }
+
+    private enum TotemSlotOwner
+    {
+        NONE,
+        BASE,
+        OVERRIDE,
+        SPECIAL_DPS
+    }
 
     private class TotemSlotStatus
     {
@@ -2784,16 +2770,7 @@ public class Main : ICustomClass
         
         s.ActualIdSource = "UNAVAILABLE"; // 3.3.5 GetTotemInfo does not provide raw ID
 
-        // SPECIAL DPS EXCEPTION (Task #03) - Fire Elemental satisfies the Base Fire slot to prevent verification loops
-        string fireEleCanonical = NormalizeTotemName(Lua.LuaDoString<string>("return GetSpellInfo(2894) or ''", ""));
-        if (slot == 1 && s.ActualNormalized != "" && s.ActualNormalized == fireEleCanonical)
-        {
-            s.Status = TotemMatchStatus.MATCH;
-            s.MatchMethod = "SPECIAL_DPS";
-            s.RankCheck = "NOT_APPLICABLE";
-            s.ActualIdSource = "NONE";
-            return s;
-        }
+
 
         if (s.ExpectedNormalized == s.ActualNormalized)
         {
@@ -2836,32 +2813,8 @@ public class Main : ICustomClass
     }
     private bool State_TotemCombatOverrides(ConfigCache c, bool isResto)
     {
-        bool anyOverrideActive = false;
-        
-        // Tremor, Grounding, Cleansing, Mana Tide are true overrides.
-        // Fire Elemental is NOT an override here.
-        uint tremor = ResolveSpell("tremor_totem");
-        if (tremor != 0 && HasExpectedState("Tremor")) anyOverrideActive = true;
-        
-        uint grounding = ResolveSpell("grounding_totem");
-        if (grounding != 0 && HasExpectedState("Grounding")) anyOverrideActive = true;
-        
-        uint cleansing = ResolveSpell("cleansing_totem");
-        if (cleansing != 0 && HasExpectedState("Cleansing")) anyOverrideActive = true;
-        
-        uint manaTide = ResolveSpell("mana_tide_totem");
-        if (manaTide != 0 && HasExpectedState("ManaTide")) anyOverrideActive = true;
-
-        if (anyOverrideActive)
-        {
-            if (_totemState == TotemPresetState.Verified)
-            {
-                _totemState = TotemPresetState.ReadyToCall;
-                FT("[TOTEM MANAGER] Override active, Verified -> ReadyToCall");
-            }
-        }
-        
-        return false; 
+        // Removed logic: Overrides are now natively tracked in State_TotemBasePreset.
+        return false;
     }
 
     private string GetActiveUtilityOverride(int slot)
@@ -2888,11 +2841,10 @@ public class Main : ICustomClass
         uint wId = ResolveSpell(isResto ? c.Resto.ActiveWaterTotem : c.Ele.ActiveWaterTotem);
         uint aId = ResolveSpell(isResto ? c.Resto.ActiveAirTotem : c.Ele.ActiveAirTotem);
         uint callId = ResolveSpell("call_of_the_elements");
-        
+
         bool inCombat = IsEffectiveCombat();
         bool moving = MovementManager.InMovement;
 
-        // 1. Detect Config Changes
         if (eId != _lastSyncEarth || fId != _lastSyncFire || wId != _lastSyncWater || aId != _lastSyncAir)
         {
             _totemState = TotemPresetState.Dirty;
@@ -2900,7 +2852,6 @@ public class Main : ICustomClass
             FTLine("[TOTEM MANAGER] PRESET CHANGED -> Dirty");
         }
 
-        // 2. FSM Explicit Transitions
         if (_totemState == TotemPresetState.Dirty)
         {
             if (!inCombat)
@@ -2914,65 +2865,60 @@ public class Main : ICustomClass
                 _totemState = TotemPresetState.ReadyToCall;
                 FTLine("[TOTEM MANAGER] InCombatLockdown -> ReadyToCall");
             }
-            return false; // Wait for next tick to proceed (deterministic lifecycle)
+            return false;
         }
         else if (_totemState == TotemPresetState.Synced)
         {
             _totemState = TotemPresetState.ReadyToCall;
             FTLine("[TOTEM MANAGER] Synced -> ReadyToCall");
-            return false; // Step-by-step deterministic
-        }
-
-        // Throttle verification if Verified
-        if (_totemState == TotemPresetState.Verified && Environment.TickCount < _nextTotemVerifyTime)
-        {
             return false;
         }
 
-        // Exact Verification
+        if (_totemState == TotemPresetState.Verified && Environment.TickCount < _nextTotemVerifyTime) return false;
+
         TotemSlotStatus fStat = GetTotemSlotStatus(1, isResto ? c.Resto.ActiveFireTotem : c.Ele.ActiveFireTotem);
         TotemSlotStatus eStat = GetTotemSlotStatus(2, isResto ? c.Resto.ActiveEarthTotem : c.Ele.ActiveEarthTotem);
         TotemSlotStatus wStat = GetTotemSlotStatus(3, isResto ? c.Resto.ActiveWaterTotem : c.Ele.ActiveWaterTotem);
         TotemSlotStatus aStat = GetTotemSlotStatus(4, isResto ? c.Resto.ActiveAirTotem : c.Ele.ActiveAirTotem);
 
-        string oFire = GetActiveUtilityOverride(1);
         string oEarth = GetActiveUtilityOverride(2);
         string oWater = GetActiveUtilityOverride(3);
         string oAir = GetActiveUtilityOverride(4);
+        
+        string fireEleCanonical = NormalizeTotemName(Lua.LuaDoString<string>("return GetSpellInfo(2894) or ''", ""));
+        bool isFireEleActive = (fStat.ActualNormalized != "" && fStat.ActualNormalized == fireEleCanonical);
 
-        int requiredCount = 0;
-        int matchCount = 0;
-        int wrongCount = 0;
-        int missingCount = 0;
-        int notRequiredCount = 0;
+        TotemSlotOwner fOwner = isFireEleActive ? TotemSlotOwner.SPECIAL_DPS : ((fStat.Status == TotemMatchStatus.MATCH || fStat.Status == TotemMatchStatus.NOT_REQUIRED) ? TotemSlotOwner.BASE : TotemSlotOwner.NONE);
+        TotemSlotOwner eOwner = (oEarth != "") ? TotemSlotOwner.OVERRIDE : ((eStat.Status == TotemMatchStatus.MATCH || eStat.Status == TotemMatchStatus.NOT_REQUIRED) ? TotemSlotOwner.BASE : TotemSlotOwner.NONE);
+        TotemSlotOwner wOwner = (oWater != "") ? TotemSlotOwner.OVERRIDE : ((wStat.Status == TotemMatchStatus.MATCH || wStat.Status == TotemMatchStatus.NOT_REQUIRED) ? TotemSlotOwner.BASE : TotemSlotOwner.NONE);
+        TotemSlotOwner aOwner = (oAir != "") ? TotemSlotOwner.OVERRIDE : ((aStat.Status == TotemMatchStatus.MATCH || aStat.Status == TotemMatchStatus.NOT_REQUIRED) ? TotemSlotOwner.BASE : TotemSlotOwner.NONE);
+
+        int missingBaseCount = 0;
         int overrideCount = 0;
 
-        if (oFire != "") overrideCount++; else if (fStat.Status == TotemMatchStatus.NOT_REQUIRED) notRequiredCount++; else { requiredCount++; if (fStat.Status == TotemMatchStatus.MATCH) matchCount++; else if (fStat.Status == TotemMatchStatus.WRONG) wrongCount++; else if (fStat.Status == TotemMatchStatus.MISSING) missingCount++; }
-        if (oEarth != "") overrideCount++; else if (eStat.Status == TotemMatchStatus.NOT_REQUIRED) notRequiredCount++; else { requiredCount++; if (eStat.Status == TotemMatchStatus.MATCH) matchCount++; else if (eStat.Status == TotemMatchStatus.WRONG) wrongCount++; else if (eStat.Status == TotemMatchStatus.MISSING) missingCount++; }
-        if (oWater != "") overrideCount++; else if (wStat.Status == TotemMatchStatus.NOT_REQUIRED) notRequiredCount++; else { requiredCount++; if (wStat.Status == TotemMatchStatus.MATCH) matchCount++; else if (wStat.Status == TotemMatchStatus.WRONG) wrongCount++; else if (wStat.Status == TotemMatchStatus.MISSING) missingCount++; }
-        if (oAir != "") overrideCount++; else if (aStat.Status == TotemMatchStatus.NOT_REQUIRED) notRequiredCount++; else { requiredCount++; if (aStat.Status == TotemMatchStatus.MATCH) matchCount++; else if (aStat.Status == TotemMatchStatus.WRONG) wrongCount++; else if (aStat.Status == TotemMatchStatus.MISSING) missingCount++; }
-
-        bool missingAny = matchCount < requiredCount;
-        bool anyOverrideActive = (overrideCount > 0);
-
-        string fOwner = (oFire != "") ? "OVERRIDE (" + oFire + ")" : "BASE";
-        string eOwner = (oEarth != "") ? "OVERRIDE (" + oEarth + ")" : "BASE";
-        string wOwner = (oWater != "") ? "OVERRIDE (" + oWater + ")" : "BASE";
-        string aOwner = (oAir != "") ? "OVERRIDE (" + oAir + ")" : "BASE";
-
-        string trace = "[TOTEM MANAGER]\n";
-        trace += "STATE=" + _totemState + "\n";
-        trace += "REQUIRED_COUNT=" + requiredCount + "\nMATCH_COUNT=" + matchCount + "\nWRONG_COUNT=" + wrongCount + "\nMISSING_COUNT=" + missingCount + "\nNOT_REQUIRED_COUNT=" + notRequiredCount + "\n";
-        trace += "CALL_ID=" + callId + "\n";
+        if (fOwner != TotemSlotOwner.BASE && fOwner != TotemSlotOwner.OVERRIDE) missingBaseCount++;
         
-        trace += "CALL_READY=" + (callId != 0 && SpellManager.GetSpellCooldownTimeLeft(callId) <= 0) + "\n";
-        trace += "OVERRIDE=" + anyOverrideActive + "\n";
-        trace += "MOVING=" + moving + "\n";
+        if (eOwner == TotemSlotOwner.OVERRIDE) overrideCount++;
+        else if (eOwner != TotemSlotOwner.BASE) missingBaseCount++;
+        
+        if (wOwner == TotemSlotOwner.OVERRIDE) overrideCount++;
+        else if (wOwner != TotemSlotOwner.BASE) missingBaseCount++;
+        
+        if (aOwner == TotemSlotOwner.OVERRIDE) overrideCount++;
+        else if (aOwner != TotemSlotOwner.BASE) missingBaseCount++;
 
-                // State Machine
+        bool missingAny = missingBaseCount > 0;
+        bool anyOverrideActive = overrideCount > 0;
+
+        bool blockDps = false;
         string decision = "";
         string reason = "";
-        bool blockDps = false;
+
+        if (_totemState == TotemPresetState.Called && Environment.TickCount >= _totemVerifyTime)
+        {
+            _totemState = TotemPresetState.ReadyToCall;
+            FTLine("[TOTEM STATE] Called verification timeout -> ReadyToCall");
+        }
 
         if (_totemState == TotemPresetState.Verified)
         {
@@ -2980,129 +2926,118 @@ public class Main : ICustomClass
             {
                 _totemState = TotemPresetState.ReadyToCall;
                 decision = "LOSS DETECTED";
-                reason = "One or more totems missing/wrong. Closing DPS Gate.";
+                reason = "Base totem lost while Verified";
                 FTLine("[TOTEM STATE] Verified -> LOSS DETECTED -> ReadyToCall");
                 blockDps = true;
             }
             else
             {
                 decision = "VERIFIED";
-                reason = "All 4 totems match. DPS Gate Open.";
-                _nextTotemVerifyTime = (uint)Environment.TickCount + 250; // 250ms interval
+                reason = "All required slots match or are overridden";
                 blockDps = false;
             }
         }
-        else if (_totemState == TotemPresetState.Called)
-        {
-            if (Environment.TickCount < _totemVerifyTime)
-            {
-                decision = "WAITING";
-                reason = "Verification window active (1.5s)";
-                blockDps = true;
-            }
-            else
-            {
-                FTLine("SLOT=FIRE\nEXPECTED_RAW=" + (isResto ? c.Resto.ActiveFireTotem : c.Ele.ActiveFireTotem) + "\nEXPECTED_NORMALIZED=" + fStat.ExpectedNormalized + "\nEXPECTED_ID=" + fStat.ExpectedId + "\nEXPECTED_RANK=" + fStat.ExpectedRank + "\nACTUAL_ID=" + fStat.ActualId + "\nACTUAL_RAW=" + fStat.ActualName + "\nACTUAL_NORMALIZED=" + fStat.ActualNormalized + "\nACTUAL_RANK=" + fStat.ActualRank + "\nSTATUS=" + fStat.Status + "\nMATCH_METHOD=" + fStat.MatchMethod + "\nRANK_CHECK=" + fStat.RankCheck + "\nACTUAL_ID_SOURCE=" + fStat.ActualIdSource + "\n");
-                FTLine("SLOT=EARTH\nOWNER=" + eOwner + "\nEXPECTED_RAW=" + (isResto ? c.Resto.ActiveEarthTotem : c.Ele.ActiveEarthTotem) + "\nEXPECTED_NORMALIZED=" + eStat.ExpectedNormalized + "\nEXPECTED_ID=" + eStat.ExpectedId + "\nEXPECTED_RANK=" + eStat.ExpectedRank + "\nACTUAL_ID=" + eStat.ActualId + "\nACTUAL_RAW=" + eStat.ActualName + "\nACTUAL_NORMALIZED=" + eStat.ActualNormalized + "\nACTUAL_RANK=" + eStat.ActualRank + "\nSTATUS=" + eStat.Status + "\nMATCH_METHOD=" + eStat.MatchMethod + "\nRANK_CHECK=" + eStat.RankCheck + "\nACTUAL_ID_SOURCE=" + eStat.ActualIdSource + "\n");
-                FTLine("SLOT=WATER\nOWNER=" + wOwner + "\nEXPECTED_RAW=" + (isResto ? c.Resto.ActiveWaterTotem : c.Ele.ActiveWaterTotem) + "\nEXPECTED_NORMALIZED=" + wStat.ExpectedNormalized + "\nEXPECTED_ID=" + wStat.ExpectedId + "\nEXPECTED_RANK=" + wStat.ExpectedRank + "\nACTUAL_ID=" + wStat.ActualId + "\nACTUAL_RAW=" + wStat.ActualName + "\nACTUAL_NORMALIZED=" + wStat.ActualNormalized + "\nACTUAL_RANK=" + wStat.ActualRank + "\nSTATUS=" + wStat.Status + "\nMATCH_METHOD=" + wStat.MatchMethod + "\nRANK_CHECK=" + wStat.RankCheck + "\nACTUAL_ID_SOURCE=" + wStat.ActualIdSource + "\n");
-                FTLine("SLOT=AIR\nOWNER=" + aOwner + "\nEXPECTED_RAW=" + (isResto ? c.Resto.ActiveAirTotem : c.Ele.ActiveAirTotem) + "\nEXPECTED_NORMALIZED=" + aStat.ExpectedNormalized + "\nEXPECTED_ID=" + aStat.ExpectedId + "\nEXPECTED_RANK=" + aStat.ExpectedRank + "\nACTUAL_ID=" + aStat.ActualId + "\nACTUAL_RAW=" + aStat.ActualName + "\nACTUAL_NORMALIZED=" + aStat.ActualNormalized + "\nACTUAL_RANK=" + aStat.ActualRank + "\nSTATUS=" + aStat.Status + "\nMATCH_METHOD=" + aStat.MatchMethod + "\nRANK_CHECK=" + aStat.RankCheck + "\nACTUAL_ID_SOURCE=" + aStat.ActualIdSource + "\n");
-                FTLine("REQUIRED_COUNT=" + requiredCount + "\nMATCH_COUNT=" + matchCount + "\nWRONG_COUNT=" + wrongCount + "\nMISSING_COUNT=" + missingCount + "\nNOT_REQUIRED_COUNT=" + notRequiredCount + "\nOVERRIDE_COUNT=" + overrideCount + "\nUNKNOWN_COUNT=0\n\nRESULT=" + (!missingAny ? "VERIFIED" : "NOT VERIFIED"));
-                if (missingAny)
-                {
-                    _totemState = TotemPresetState.ReadyToCall;
-                    decision = "CALL VERIFY FAILED";
-                    reason = "Verification window expired and 4/4 match failed";
-                    FTLine("[TOTEM STATE] Called -> VERIFY FAILED -> ReadyToCall");
-                    blockDps = true;
-                }
-                else
-                {
-                    _totemState = TotemPresetState.Verified;
-                    decision = "STATE TRANSITION";
-                    reason = "4/4 Match successful. Transitioning to Verified.";
-                    FTLine("[TOTEM STATE] Called -> Verified");
-                    FTLine("[TOTEM VERIFY] 4/4");
-                    blockDps = true; // Wait for next tick to start DPS
-                }
-            }
-        }
-        else // ReadyToCall
+
+        if (_totemState == TotemPresetState.ReadyToCall)
         {
             if (!missingAny)
             {
                 _totemState = TotemPresetState.Verified;
                 decision = "STATE TRANSITION";
-                reason = "Already 4/4 match.";
+                reason = "All required slots satisfied.";
                 FTLine("[TOTEM STATE] ReadyToCall -> Verified");
-                blockDps = true;
-            }
-            else if (!inCombat)
-            {
-                decision = "OOC";
-                reason = "Waiting for combat to start.";
                 blockDps = false;
             }
-
             else if (moving)
             {
                 decision = "WAIT";
-                reason = "MOVING";
-                blockDps = true;
+                reason = "Moving";
+                blockDps = false;
             }
-            else if (callId != 0)
+            else if (callId != 0 && !anyOverrideActive)
             {
                 if (SpellManager.GetSpellCooldownTimeLeft(callId) <= 0)
                 {
                     SpellManager.CastSpellByIdLUA(callId);
-                    FTLine("[TOTEM ACTION] CALL_OF_THE_ELEMENTS\nSPELL_ID=" + callId + "\nSTATE_BEFORE=ReadyToCall\nSTATE_AFTER=Called");
                     _totemState = TotemPresetState.Called;
                     _totemVerifyTime = (uint)Environment.TickCount + 1500;
-                    decision = "CAST CALL";
-                    reason = "Call of the Elements used";
+                    decision = "CALL_OF_THE_ELEMENTS";
+                    reason = "Missing base totems, casting global Call";
                     blockDps = true;
                 }
                 else
                 {
                     decision = "WAIT";
-                    reason = "Call on cooldown";
+                    reason = "Call of the Elements on Cooldown";
                     blockDps = true;
                 }
             }
             else
             {
-                // callId == 0 (Fallback)
-                if ((fStat.Status == TotemMatchStatus.MISSING || fStat.Status == TotemMatchStatus.WRONG) && SpellManager.GetSpellCooldownTimeLeft(fId) <= 0) { SpellManager.CastSpellByIdLUA(fId); _totemState = TotemPresetState.Called; _totemVerifyTime = (uint)Environment.TickCount + 1500; decision = "FALLBACK CAST"; reason = "Fire"; blockDps = true; }
-                else if ((eStat.Status == TotemMatchStatus.MISSING || eStat.Status == TotemMatchStatus.WRONG) && SpellManager.GetSpellCooldownTimeLeft(eId) <= 0) { SpellManager.CastSpellByIdLUA(eId); _totemState = TotemPresetState.Called; _totemVerifyTime = (uint)Environment.TickCount + 1500; decision = "FALLBACK CAST"; reason = "Earth"; blockDps = true; }
-                else if ((wStat.Status == TotemMatchStatus.MISSING || wStat.Status == TotemMatchStatus.WRONG) && SpellManager.GetSpellCooldownTimeLeft(wId) <= 0) { SpellManager.CastSpellByIdLUA(wId); _totemState = TotemPresetState.Called; _totemVerifyTime = (uint)Environment.TickCount + 1500; decision = "FALLBACK CAST"; reason = "Water"; blockDps = true; }
-                else if ((aStat.Status == TotemMatchStatus.MISSING || aStat.Status == TotemMatchStatus.WRONG) && SpellManager.GetSpellCooldownTimeLeft(aId) <= 0) { SpellManager.CastSpellByIdLUA(aId); _totemState = TotemPresetState.Called; _totemVerifyTime = (uint)Environment.TickCount + 1500; decision = "FALLBACK CAST"; reason = "Air"; blockDps = true; }
+                if ((fOwner == TotemSlotOwner.NONE || fOwner == TotemSlotOwner.SPECIAL_DPS) && fStat.Status != TotemMatchStatus.NOT_REQUIRED && SpellManager.GetSpellCooldownTimeLeft(fId) <= 0) { SpellManager.CastSpellByIdLUA(fId); _totemState = TotemPresetState.Called; _totemVerifyTime = (uint)Environment.TickCount + 1500; decision = "FALLBACK CAST"; reason = "Fire"; blockDps = true; }
+                else if (eOwner == TotemSlotOwner.NONE && eStat.Status != TotemMatchStatus.NOT_REQUIRED && SpellManager.GetSpellCooldownTimeLeft(eId) <= 0) { SpellManager.CastSpellByIdLUA(eId); _totemState = TotemPresetState.Called; _totemVerifyTime = (uint)Environment.TickCount + 1500; decision = "FALLBACK CAST"; reason = "Earth"; blockDps = true; }
+                else if (wOwner == TotemSlotOwner.NONE && wStat.Status != TotemMatchStatus.NOT_REQUIRED && SpellManager.GetSpellCooldownTimeLeft(wId) <= 0) { SpellManager.CastSpellByIdLUA(wId); _totemState = TotemPresetState.Called; _totemVerifyTime = (uint)Environment.TickCount + 1500; decision = "FALLBACK CAST"; reason = "Water"; blockDps = true; }
+                else if (aOwner == TotemSlotOwner.NONE && aStat.Status != TotemMatchStatus.NOT_REQUIRED && SpellManager.GetSpellCooldownTimeLeft(aId) <= 0) { SpellManager.CastSpellByIdLUA(aId); _totemState = TotemPresetState.Called; _totemVerifyTime = (uint)Environment.TickCount + 1500; decision = "FALLBACK CAST"; reason = "Air"; blockDps = true; }
                 else
                 {
-                    decision = "WAIT";
-                    reason = "Fallback cooldowns";
-                    blockDps = true;
+                    if (anyOverrideActive)
+                    {
+                        decision = "BLOCK_BASE_CALL";
+                        reason = "UTILITY_OVERRIDE_ACTIVE - deferring global call, individual fallbacks not ready";
+                        blockDps = false;
+                    }
+                    else
+                    {
+                        decision = "WAIT";
+                        reason = "Fallback cooldowns";
+                        blockDps = true;
+                    }
                 }
             }
         }
+        else if (_totemState == TotemPresetState.Called)
+        {
+            decision = "WAIT_FOR_VERIFY";
+            reason = "Waiting for game API to update totems";
+            blockDps = true;
+        }
 
-        trace += "DECISION=" + decision + "\n";
-        trace += "REASON=" + reason + "\n";
-        
+        string trace = "[TOTEM OWNER]\n\n" +
+            "SLOT=FIRE\nOWNER=" + fOwner.ToString() + "\nBASE_EXPECTED=" + fStat.ExpectedName + "\nBASE_ACTUAL=" + fStat.ActualName + "\nSPECIAL_DPS=" + (isFireEleActive ? fStat.ActualName : "false") + "\n\n" +
+            "SLOT=EARTH\nOWNER=" + eOwner.ToString() + "\nBASE_EXPECTED=" + eStat.ExpectedName + "\nBASE_ACTUAL=" + eStat.ActualName + "\nOVERRIDE=" + (oEarth != "" ? oEarth : "false") + "\n\n" +
+            "SLOT=WATER\nOWNER=" + wOwner.ToString() + "\nBASE_EXPECTED=" + wStat.ExpectedName + "\nBASE_ACTUAL=" + wStat.ActualName + "\nOVERRIDE=" + (oWater != "" ? oWater : "false") + "\n\n" +
+            "SLOT=AIR\nOWNER=" + aOwner.ToString() + "\nBASE_EXPECTED=" + aStat.ExpectedName + "\nBASE_ACTUAL=" + aStat.ActualName + "\nOVERRIDE=" + (oAir != "" ? oAir : "false") + "\n\n" +
+            "[TOTEM OVERRIDE DECISION]\n\n" +
+            "OVERRIDE_COUNT=" + overrideCount + "\n" +
+            "MISSING_BASE_COUNT=" + missingBaseCount + "\n" +
+            "CALL_DECISION=" + decision + "\n" +
+            "CALL_REASON=" + reason + "\n" +
+            "DPS_ALLOWED=" + (!blockDps).ToString();
         if (trace != _lastTotemTrace)
         {
             FTLine(trace);
-            if (decision == "VERIFIED") FTLine("[TOTEM VERIFY] 4/4");
-            else if (decision == "CALL VERIFY FAILED" || decision == "LOSS DETECTED") FTLine("[TOTEM VERIFY] " + matchCount + "/4 FAIL");
+            
+            if (isFireEleActive)
+            {
+                FTLine("\n[SPECIAL DPS]\nSPELL=Fire Elemental\nOWNER=SPECIAL_DPS\nBASE_FIRE_SATISFIED=false\nOVERRIDE=false\n");
+            }
+            
             _lastTotemTrace = trace;
         }
 
         if (moving != _wasMoving && !moving)
         {
-            _nextTotemVerifyTime = 0; // Force immediate check after stopping
+            _nextTotemVerifyTime = 0; 
         }
         _wasMoving = moving;
 
         return blockDps;
     }
+
+    private string _lastTotemTrace = "";
+    private uint _nextTotemVerifyTime = 0;
+    private bool _wasMoving = false;
+    private string _lastFireEleTrace = "";
 private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
 	{
 		FT("[BUFFS FULL] State_BuffsAndTotems");
