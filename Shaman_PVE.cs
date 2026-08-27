@@ -2645,33 +2645,111 @@ public class Main : ICustomClass
     private uint _nextTotemVerifyTime = 0;
     private bool _wasMoving = false;
 
+    private enum TotemMatchStatus { MISSING, WRONG, MATCH, NOT_REQUIRED }
+
     private class TotemSlotStatus
     {
         public uint ExpectedId;
         public string ExpectedName;
+        public string ExpectedNormalized;
+        
+        public uint ActualId;
         public string ActualName;
-        public bool Match;
+        public string ActualNormalized;
+        
+        public TotemMatchStatus Status;
+        public string MatchMethod;
+        public string RankCheck;
     }
 
-    private TotemSlotStatus GetTotemSlotStatus(int slot, uint expectedId)
+    private string NormalizeTotemSelection(string raw)
+    {
+        if (string.IsNullOrEmpty(raw)) return "";
+        raw = raw.Trim();
+        if (raw.Equals("None", System.StringComparison.OrdinalIgnoreCase) || raw.Equals("Auto", System.StringComparison.OrdinalIgnoreCase)) return "";
+
+        int metaIdx = raw.IndexOf("#||#");
+        if (metaIdx >= 0)
+        {
+            raw = raw.Substring(0, metaIdx).Trim();
+        }
+        return raw;
+    }
+
+    private string NormalizeTotemName(string name)
+    {
+        if (string.IsNullOrEmpty(name)) return "";
+        
+        int metaIdx = name.IndexOf("#||#");
+        if (metaIdx >= 0) name = name.Substring(0, metaIdx);
+        
+        string n = name.Trim();
+        
+        int bracketIdx = n.IndexOf("(");
+        if (bracketIdx > 0) n = n.Substring(0, bracketIdx).Trim();
+        
+        string[] roman = { " X", " IX", " VIII", " VII", " VI", " V", " IV", " III", " II", " I" };
+        foreach (var r in roman)
+        {
+            if (n.EndsWith(r))
+            {
+                n = n.Substring(0, n.Length - r.Length).Trim();
+                break;
+            }
+        }
+        
+        n = System.Text.RegularExpressions.Regex.Replace(n, @"(?i)(Уровень|Rank|Ранг)\s*\d+$", "").Trim();
+        return n.ToLowerInvariant();
+    }
+
+    private TotemSlotStatus GetTotemSlotStatus(int slot, string rawConfigValue)
     {
         TotemSlotStatus s = new TotemSlotStatus();
-        s.ExpectedId = expectedId;
-        if (expectedId == 0)
+        string normalizedSelection = NormalizeTotemSelection(rawConfigValue);
+        s.ExpectedId = ResolveSpell(normalizedSelection);
+        
+        if (s.ExpectedId == 0)
         {
             s.ExpectedName = "None";
-            s.ActualName = "None";
-            s.Match = true;
+            s.ExpectedNormalized = "none";
+            s.ActualName = Lua.LuaDoString<string>("local have, name = GetTotemInfo(" + slot + "); if have and name ~= nil and name ~= '' then return name else return 'None' end", "");
+            s.ActualNormalized = (s.ActualName == "None") ? "none" : NormalizeTotemName(s.ActualName);
+            s.ActualId = 0;
+            
+            s.Status = TotemMatchStatus.NOT_REQUIRED;
+            s.MatchMethod = "NONE";
+            s.RankCheck = "UNAVAILABLE";
             return s;
         }
 
-        s.ExpectedName = Lua.LuaDoString<string>("return GetSpellInfo(" + expectedId + ");", "");
-        s.ActualName = Lua.LuaDoString<string>("local have, name = GetTotemInfo(" + slot + "); if have then return name else return 'None' end", "");
+        s.ExpectedName = Lua.LuaDoString<string>("local name = GetSpellInfo(" + s.ExpectedId + "); return name or '';", "");
+        s.ExpectedNormalized = NormalizeTotemName(s.ExpectedName);
+
+        s.ActualName = Lua.LuaDoString<string>("local have, name = GetTotemInfo(" + slot + "); if have and name ~= nil and name ~= '' then return name else return 'None' end", "");
+        s.ActualNormalized = (s.ActualName == "None") ? "none" : NormalizeTotemName(s.ActualName);
+        s.ActualId = 0; // WotLK API does not expose totem spell ID natively
         
-        s.Match = (s.ActualName != "None" && s.ActualName == s.ExpectedName);
+        if (s.ActualName == "None")
+        {
+            s.Status = TotemMatchStatus.MISSING;
+            s.MatchMethod = "NONE";
+            s.RankCheck = "UNAVAILABLE";
+            return s;
+        }
+
+        if (s.ExpectedNormalized == s.ActualNormalized)
+        {
+            s.Status = TotemMatchStatus.MATCH;
+            s.MatchMethod = "NAME_NORMALIZED";
+            s.RankCheck = "UNAVAILABLE";
+            return s;
+        }
+
+        s.Status = TotemMatchStatus.WRONG;
+        s.MatchMethod = "NAME_NORMALIZED";
+        s.RankCheck = "UNAVAILABLE";
         return s;
     }
-
     private bool State_TotemCombatOverrides(ConfigCache c, bool isResto)
     {
         bool anyOverrideActive = false;
@@ -2751,12 +2829,15 @@ public class Main : ICustomClass
         }
 
         // Exact Verification
-        TotemSlotStatus fStat = GetTotemSlotStatus(1, fId);
-        TotemSlotStatus eStat = GetTotemSlotStatus(2, eId);
-        TotemSlotStatus wStat = GetTotemSlotStatus(3, wId);
-        TotemSlotStatus aStat = GetTotemSlotStatus(4, aId);
+        TotemSlotStatus fStat = GetTotemSlotStatus(1, isResto ? c.Resto.ActiveFireTotem : c.Ele.ActiveFireTotem);
+        TotemSlotStatus eStat = GetTotemSlotStatus(2, isResto ? c.Resto.ActiveEarthTotem : c.Ele.ActiveEarthTotem);
+        TotemSlotStatus wStat = GetTotemSlotStatus(3, isResto ? c.Resto.ActiveWaterTotem : c.Ele.ActiveWaterTotem);
+        TotemSlotStatus aStat = GetTotemSlotStatus(4, isResto ? c.Resto.ActiveAirTotem : c.Ele.ActiveAirTotem);
 
-        int matchCount = (fStat.Match ? 1 : 0) + (eStat.Match ? 1 : 0) + (wStat.Match ? 1 : 0) + (aStat.Match ? 1 : 0);
+        int matchCount = (fStat.Status == TotemMatchStatus.MATCH || fStat.Status == TotemMatchStatus.NOT_REQUIRED ? 1 : 0) + 
+                         (eStat.Status == TotemMatchStatus.MATCH || eStat.Status == TotemMatchStatus.NOT_REQUIRED ? 1 : 0) + 
+                         (wStat.Status == TotemMatchStatus.MATCH || wStat.Status == TotemMatchStatus.NOT_REQUIRED ? 1 : 0) + 
+                         (aStat.Status == TotemMatchStatus.MATCH || aStat.Status == TotemMatchStatus.NOT_REQUIRED ? 1 : 0);
         bool missingAny = matchCount < 4;
 
         string trace = "[TOTEM MANAGER]\n";
@@ -2802,7 +2883,12 @@ public class Main : ICustomClass
             }
             else
             {
-                FTLine("[TOTEM VERIFY]\nFIRE=" + fStat.ActualName + "\nEARTH=" + eStat.ActualName + "\nWATER=" + wStat.ActualName + "\nAIR=" + aStat.ActualName + "\nMATCH_COUNT=" + matchCount + "/4");
+                FTLine("[TOTEM VERIFY]");
+                FTLine("SLOT=FIRE\nEXPECTED_RAW=" + (isResto ? c.Resto.ActiveFireTotem : c.Ele.ActiveFireTotem) + "\nEXPECTED_NORMALIZED=" + fStat.ExpectedNormalized + "\nEXPECTED_ID=" + fStat.ExpectedId + "\nACTUAL_ID=" + fStat.ActualId + "\nACTUAL_NAME=" + fStat.ActualName + "\nACTUAL_NORMALIZED=" + fStat.ActualNormalized + "\nSTATUS=" + fStat.Status + "\nMATCH_METHOD=" + fStat.MatchMethod + "\nRANK_CHECK=" + fStat.RankCheck);
+                FTLine("SLOT=EARTH\nEXPECTED_RAW=" + (isResto ? c.Resto.ActiveEarthTotem : c.Ele.ActiveEarthTotem) + "\nEXPECTED_NORMALIZED=" + eStat.ExpectedNormalized + "\nEXPECTED_ID=" + eStat.ExpectedId + "\nACTUAL_ID=" + eStat.ActualId + "\nACTUAL_NAME=" + eStat.ActualName + "\nACTUAL_NORMALIZED=" + eStat.ActualNormalized + "\nSTATUS=" + eStat.Status + "\nMATCH_METHOD=" + eStat.MatchMethod + "\nRANK_CHECK=" + eStat.RankCheck);
+                FTLine("SLOT=WATER\nEXPECTED_RAW=" + (isResto ? c.Resto.ActiveWaterTotem : c.Ele.ActiveWaterTotem) + "\nEXPECTED_NORMALIZED=" + wStat.ExpectedNormalized + "\nEXPECTED_ID=" + wStat.ExpectedId + "\nACTUAL_ID=" + wStat.ActualId + "\nACTUAL_NAME=" + wStat.ActualName + "\nACTUAL_NORMALIZED=" + wStat.ActualNormalized + "\nSTATUS=" + wStat.Status + "\nMATCH_METHOD=" + wStat.MatchMethod + "\nRANK_CHECK=" + wStat.RankCheck);
+                FTLine("SLOT=AIR\nEXPECTED_RAW=" + (isResto ? c.Resto.ActiveAirTotem : c.Ele.ActiveAirTotem) + "\nEXPECTED_NORMALIZED=" + aStat.ExpectedNormalized + "\nEXPECTED_ID=" + aStat.ExpectedId + "\nACTUAL_ID=" + aStat.ActualId + "\nACTUAL_NAME=" + aStat.ActualName + "\nACTUAL_NORMALIZED=" + aStat.ActualNormalized + "\nSTATUS=" + aStat.Status + "\nMATCH_METHOD=" + aStat.MatchMethod + "\nRANK_CHECK=" + aStat.RankCheck);
+                FTLine("MATCH_COUNT=" + matchCount + "/4");
                 if (missingAny)
                 {
                     _totemState = TotemPresetState.ReadyToCall;
@@ -2872,10 +2958,10 @@ public class Main : ICustomClass
             else
             {
                 // callId == 0 (Fallback)
-                if (!fStat.Match && SpellManager.GetSpellCooldownTimeLeft(fId) <= 0) { SpellManager.CastSpellByIdLUA(fId); _totemState = TotemPresetState.Called; _totemVerifyTime = (uint)Environment.TickCount + 1500; decision = "FALLBACK CAST"; reason = "Fire"; blockDps = true; }
-                else if (!eStat.Match && SpellManager.GetSpellCooldownTimeLeft(eId) <= 0) { SpellManager.CastSpellByIdLUA(eId); _totemState = TotemPresetState.Called; _totemVerifyTime = (uint)Environment.TickCount + 1500; decision = "FALLBACK CAST"; reason = "Earth"; blockDps = true; }
-                else if (!wStat.Match && SpellManager.GetSpellCooldownTimeLeft(wId) <= 0) { SpellManager.CastSpellByIdLUA(wId); _totemState = TotemPresetState.Called; _totemVerifyTime = (uint)Environment.TickCount + 1500; decision = "FALLBACK CAST"; reason = "Water"; blockDps = true; }
-                else if (!aStat.Match && SpellManager.GetSpellCooldownTimeLeft(aId) <= 0) { SpellManager.CastSpellByIdLUA(aId); _totemState = TotemPresetState.Called; _totemVerifyTime = (uint)Environment.TickCount + 1500; decision = "FALLBACK CAST"; reason = "Air"; blockDps = true; }
+                if ((fStat.Status == TotemMatchStatus.MISSING || fStat.Status == TotemMatchStatus.WRONG) && SpellManager.GetSpellCooldownTimeLeft(fId) <= 0) { SpellManager.CastSpellByIdLUA(fId); _totemState = TotemPresetState.Called; _totemVerifyTime = (uint)Environment.TickCount + 1500; decision = "FALLBACK CAST"; reason = "Fire"; blockDps = true; }
+                else if ((eStat.Status == TotemMatchStatus.MISSING || eStat.Status == TotemMatchStatus.WRONG) && SpellManager.GetSpellCooldownTimeLeft(eId) <= 0) { SpellManager.CastSpellByIdLUA(eId); _totemState = TotemPresetState.Called; _totemVerifyTime = (uint)Environment.TickCount + 1500; decision = "FALLBACK CAST"; reason = "Earth"; blockDps = true; }
+                else if ((wStat.Status == TotemMatchStatus.MISSING || wStat.Status == TotemMatchStatus.WRONG) && SpellManager.GetSpellCooldownTimeLeft(wId) <= 0) { SpellManager.CastSpellByIdLUA(wId); _totemState = TotemPresetState.Called; _totemVerifyTime = (uint)Environment.TickCount + 1500; decision = "FALLBACK CAST"; reason = "Water"; blockDps = true; }
+                else if ((aStat.Status == TotemMatchStatus.MISSING || aStat.Status == TotemMatchStatus.WRONG) && SpellManager.GetSpellCooldownTimeLeft(aId) <= 0) { SpellManager.CastSpellByIdLUA(aId); _totemState = TotemPresetState.Called; _totemVerifyTime = (uint)Environment.TickCount + 1500; decision = "FALLBACK CAST"; reason = "Air"; blockDps = true; }
                 else
                 {
                     decision = "WAIT";
