@@ -2662,6 +2662,7 @@ public class Main : ICustomClass
         public TotemMatchStatus Status;
         public string MatchMethod;
         public string RankCheck;
+        public string ActualIdSource;
     }
 
     private string NormalizeTotemSelection(string raw)
@@ -2751,6 +2752,7 @@ public class Main : ICustomClass
             s.Status = TotemMatchStatus.NOT_REQUIRED;
             s.MatchMethod = "NONE";
             s.RankCheck = "NOT_REQUIRED";
+            s.ActualIdSource = "NONE";
             return s;
         }
 
@@ -2772,6 +2774,7 @@ public class Main : ICustomClass
             s.Status = TotemMatchStatus.MISSING;
             s.MatchMethod = "NONE";
             s.RankCheck = "UNAVAILABLE";
+            s.ActualIdSource = "NONE";
             return s;
         }
 
@@ -2779,6 +2782,8 @@ public class Main : ICustomClass
         s.ActualRank = ExtractTotemRank(s.ActualName);
         s.ActualId = 0; 
         
+        s.ActualIdSource = "UNAVAILABLE"; // 3.3.5 GetTotemInfo does not provide raw ID
+
         if (s.ExpectedNormalized == s.ActualNormalized)
         {
             if (s.ExpectedRank > 0 && s.ActualRank > 0)
@@ -2796,11 +2801,17 @@ public class Main : ICustomClass
                     s.RankCheck = "FAIL";
                 }
             }
-            else
+            else if (s.ExpectedRank == 0 && s.ActualRank == 0)
             {
                 s.Status = TotemMatchStatus.MATCH;
                 s.MatchMethod = "NAME_ONLY";
-                s.RankCheck = "UNAVAILABLE";
+                s.RankCheck = "NOT_APPLICABLE";
+            }
+            else
+            {
+                s.Status = TotemMatchStatus.WRONG;
+                s.MatchMethod = "NAME_RANK_MISMATCH";
+                s.RankCheck = "FAIL";
             }
         }
         else
@@ -2951,11 +2962,11 @@ public class Main : ICustomClass
             }
             else
             {
-                FTLine("[TOTEM VERIFY]\n\nSLOT=FIRE\nEXPECTED_RAW=" + (isResto ? c.Resto.ActiveFireTotem : c.Ele.ActiveFireTotem) + "\nEXPECTED_NORMALIZED=" + fStat.ExpectedNormalized + "\nEXPECTED_ID=" + fStat.ExpectedId + "\nEXPECTED_RANK=" + fStat.ExpectedRank + "\nACTUAL_ID=" + fStat.ActualId + "\nACTUAL_RAW=" + fStat.ActualName + "\nACTUAL_NORMALIZED=" + fStat.ActualNormalized + "\nACTUAL_RANK=" + fStat.ActualRank + "\nSTATUS=" + fStat.Status + "\nMATCH_METHOD=" + fStat.MatchMethod + "\nRANK_CHECK=" + fStat.RankCheck + "\n");
-                FTLine("SLOT=EARTH\nEXPECTED_RAW=" + (isResto ? c.Resto.ActiveEarthTotem : c.Ele.ActiveEarthTotem) + "\nEXPECTED_NORMALIZED=" + eStat.ExpectedNormalized + "\nEXPECTED_ID=" + eStat.ExpectedId + "\nEXPECTED_RANK=" + eStat.ExpectedRank + "\nACTUAL_ID=" + eStat.ActualId + "\nACTUAL_RAW=" + eStat.ActualName + "\nACTUAL_NORMALIZED=" + eStat.ActualNormalized + "\nACTUAL_RANK=" + eStat.ActualRank + "\nSTATUS=" + eStat.Status + "\nMATCH_METHOD=" + eStat.MatchMethod + "\nRANK_CHECK=" + eStat.RankCheck + "\n");
-                FTLine("SLOT=WATER\nEXPECTED_RAW=" + (isResto ? c.Resto.ActiveWaterTotem : c.Ele.ActiveWaterTotem) + "\nEXPECTED_NORMALIZED=" + wStat.ExpectedNormalized + "\nEXPECTED_ID=" + wStat.ExpectedId + "\nEXPECTED_RANK=" + wStat.ExpectedRank + "\nACTUAL_ID=" + wStat.ActualId + "\nACTUAL_RAW=" + wStat.ActualName + "\nACTUAL_NORMALIZED=" + wStat.ActualNormalized + "\nACTUAL_RANK=" + wStat.ActualRank + "\nSTATUS=" + wStat.Status + "\nMATCH_METHOD=" + wStat.MatchMethod + "\nRANK_CHECK=" + wStat.RankCheck + "\n");
-                FTLine("SLOT=AIR\nEXPECTED_RAW=" + (isResto ? c.Resto.ActiveAirTotem : c.Ele.ActiveAirTotem) + "\nEXPECTED_NORMALIZED=" + aStat.ExpectedNormalized + "\nEXPECTED_ID=" + aStat.ExpectedId + "\nEXPECTED_RANK=" + aStat.ExpectedRank + "\nACTUAL_ID=" + aStat.ActualId + "\nACTUAL_RAW=" + aStat.ActualName + "\nACTUAL_NORMALIZED=" + aStat.ActualNormalized + "\nACTUAL_RANK=" + aStat.ActualRank + "\nSTATUS=" + aStat.Status + "\nMATCH_METHOD=" + aStat.MatchMethod + "\nRANK_CHECK=" + aStat.RankCheck + "\n");
-                FTLine("REQUIRED_COUNT=" + requiredCount + "\nMATCH_COUNT=" + matchCount + "\nWRONG_COUNT=" + wrongCount + "\nMISSING_COUNT=" + missingCount + "\nNOT_REQUIRED_COUNT=" + notRequiredCount);
+                FTLine("[TOTEM VERIFY]\n\nSLOT=FIRE\nEXPECTED_RAW=" + (isResto ? c.Resto.ActiveFireTotem : c.Ele.ActiveFireTotem) + "\nEXPECTED_NORMALIZED=" + fStat.ExpectedNormalized + "\nEXPECTED_ID=" + fStat.ExpectedId + "\nEXPECTED_RANK=" + fStat.ExpectedRank + "\nACTUAL_ID=" + fStat.ActualId + "\nACTUAL_RAW=" + fStat.ActualName + "\nACTUAL_NORMALIZED=" + fStat.ActualNormalized + "\nACTUAL_RANK=" + fStat.ActualRank + "\nSTATUS=" + fStat.Status + "\nMATCH_METHOD=" + fStat.MatchMethod + "\nRANK_CHECK=" + fStat.RankCheck + "\nACTUAL_ID_SOURCE=" + fStat.ActualIdSource + "\n");
+                FTLine("SLOT=EARTH\nEXPECTED_RAW=" + (isResto ? c.Resto.ActiveEarthTotem : c.Ele.ActiveEarthTotem) + "\nEXPECTED_NORMALIZED=" + eStat.ExpectedNormalized + "\nEXPECTED_ID=" + eStat.ExpectedId + "\nEXPECTED_RANK=" + eStat.ExpectedRank + "\nACTUAL_ID=" + eStat.ActualId + "\nACTUAL_RAW=" + eStat.ActualName + "\nACTUAL_NORMALIZED=" + eStat.ActualNormalized + "\nACTUAL_RANK=" + eStat.ActualRank + "\nSTATUS=" + eStat.Status + "\nMATCH_METHOD=" + eStat.MatchMethod + "\nRANK_CHECK=" + eStat.RankCheck + "\nACTUAL_ID_SOURCE=" + eStat.ActualIdSource + "\n");
+                FTLine("SLOT=WATER\nEXPECTED_RAW=" + (isResto ? c.Resto.ActiveWaterTotem : c.Ele.ActiveWaterTotem) + "\nEXPECTED_NORMALIZED=" + wStat.ExpectedNormalized + "\nEXPECTED_ID=" + wStat.ExpectedId + "\nEXPECTED_RANK=" + wStat.ExpectedRank + "\nACTUAL_ID=" + wStat.ActualId + "\nACTUAL_RAW=" + wStat.ActualName + "\nACTUAL_NORMALIZED=" + wStat.ActualNormalized + "\nACTUAL_RANK=" + wStat.ActualRank + "\nSTATUS=" + wStat.Status + "\nMATCH_METHOD=" + wStat.MatchMethod + "\nRANK_CHECK=" + wStat.RankCheck + "\nACTUAL_ID_SOURCE=" + wStat.ActualIdSource + "\n");
+                FTLine("SLOT=AIR\nEXPECTED_RAW=" + (isResto ? c.Resto.ActiveAirTotem : c.Ele.ActiveAirTotem) + "\nEXPECTED_NORMALIZED=" + aStat.ExpectedNormalized + "\nEXPECTED_ID=" + aStat.ExpectedId + "\nEXPECTED_RANK=" + aStat.ExpectedRank + "\nACTUAL_ID=" + aStat.ActualId + "\nACTUAL_RAW=" + aStat.ActualName + "\nACTUAL_NORMALIZED=" + aStat.ActualNormalized + "\nACTUAL_RANK=" + aStat.ActualRank + "\nSTATUS=" + aStat.Status + "\nMATCH_METHOD=" + aStat.MatchMethod + "\nRANK_CHECK=" + aStat.RankCheck + "\nACTUAL_ID_SOURCE=" + aStat.ActualIdSource + "\n");
+                FTLine("REQUIRED_COUNT=" + requiredCount + "\nMATCH_COUNT=" + matchCount + "\nWRONG_COUNT=" + wrongCount + "\nMISSING_COUNT=" + missingCount + "\nNOT_REQUIRED_COUNT=" + notRequiredCount + "\nUNKNOWN_COUNT=0\n\nRESULT=" + (!missingAny ? "VERIFIED" : "NOT VERIFIED"));
                 if (missingAny)
                 {
                     _totemState = TotemPresetState.ReadyToCall;
