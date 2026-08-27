@@ -2845,14 +2845,19 @@ public class Main : ICustomClass
         for (int i = 0; i < checkSpells.Length; i++)
         {
             string sName = Lua.LuaDoString<string>("return GetSpellInfo(" + checkSpells[i] + ") or ''", "");
+            int sRank = Lua.LuaDoString<int>("local n, r = GetSpellInfo(" + checkSpells[i] + "); if r then local d = string.match(r, '%d+'); if d then return tonumber(d) end end return 0;", "");
+            
             if (sName != "" && norm == NormalizeTotemName(sName))
             {
-                info.Active = true;
-                info.SpellId = checkSpells[i];
-                info.Name = actualName;
-                info.Rank = rank;
-                info.MatchMethod = "UTILITY_IDENTITY";
-                return info;
+                if (sRank == 0 || sRank == rank)
+                {
+                    info.Active = true;
+                    info.SpellId = checkSpells[i];
+                    info.Name = actualName;
+                    info.Rank = rank;
+                    info.MatchMethod = "UTILITY_IDENTITY";
+                    return info;
+                }
             }
         }
 
@@ -2876,7 +2881,7 @@ public class Main : ICustomClass
         return true;
     }
 
-    private bool CanCallBaseTotems(uint callId, OverrideInfo[] overrides, out string callReason)
+    private bool CanCallBaseTotems(uint callId, OverrideInfo[] overrides, TotemSlotOwner[] owners, out string callReason)
     {
         if (callId == 0)
         {
@@ -2888,6 +2893,11 @@ public class Main : ICustomClass
             if (overrides[i] != null && overrides[i].Active)
             {
                 callReason = "UTILITY_OVERRIDE_ACTIVE";
+                return false;
+            }
+            if (owners[i] == TotemSlotOwner.SPECIAL_DPS)
+            {
+                callReason = "SPECIAL_DPS_ACTIVE";
                 return false;
             }
         }
@@ -2969,7 +2979,7 @@ public class Main : ICustomClass
         bool blockDps = !dpsAllowed;
 
         string callReason;
-        bool callAllowed = CanCallBaseTotems(callId, overrides, out callReason);
+        bool callAllowed = CanCallBaseTotems(callId, overrides, owners, out callReason);
 
         string decision = "";
         string reason = "";
@@ -2980,29 +2990,39 @@ public class Main : ICustomClass
             FTLine("[TOTEM STATE] Called verification timeout -> ReadyToCall");
         }
 
+        bool baseMissingAny = false;
+        for (int i = 0; i < 4; i++)
+        {
+            if (baseStatuses[i].Status == TotemMatchStatus.MISSING || baseStatuses[i].Status == TotemMatchStatus.WRONG)
+            {
+                baseMissingAny = true;
+                break;
+            }
+        }
+
         if (_totemState == TotemPresetState.Verified)
         {
-            if (!dpsAllowed)
+            if (baseMissingAny)
             {
                 _totemState = TotemPresetState.ReadyToCall;
                 decision = "LOSS DETECTED";
-                reason = "Base totem lost and not protected by override";
+                reason = "Base totem lost";
                 FTLine("[TOTEM STATE] Verified -> LOSS DETECTED -> ReadyToCall");
             }
             else
             {
                 decision = "VERIFIED";
-                reason = dpsReason;
+                reason = "Base totems intact";
             }
         }
 
         if (_totemState == TotemPresetState.ReadyToCall)
         {
-            if (dpsAllowed)
+            if (!baseMissingAny)
             {
                 _totemState = TotemPresetState.Verified;
                 decision = "STATE TRANSITION";
-                reason = "All required slots satisfied or protected.";
+                reason = "Base totems restored";
                 FTLine("[TOTEM STATE] ReadyToCall -> Verified");
             }
             else if (moving)
@@ -3029,7 +3049,7 @@ public class Main : ICustomClass
             else
             {
                 // Fallbacks
-                if ((fOwner == TotemSlotOwner.NONE || fOwner == TotemSlotOwner.SPECIAL_DPS) && fStat.Status != TotemMatchStatus.NOT_REQUIRED && SpellManager.GetSpellCooldownTimeLeft(fId) <= 0) { SpellManager.CastSpellByIdLUA(fId); _totemState = TotemPresetState.Called; _totemVerifyTime = (uint)Environment.TickCount + 1500; decision = "FALLBACK CAST"; reason = "Fire"; }
+                if (fOwner == TotemSlotOwner.NONE && fStat.Status != TotemMatchStatus.NOT_REQUIRED && SpellManager.GetSpellCooldownTimeLeft(fId) <= 0) { SpellManager.CastSpellByIdLUA(fId); _totemState = TotemPresetState.Called; _totemVerifyTime = (uint)Environment.TickCount + 1500; decision = "FALLBACK CAST"; reason = "Fire"; }
                 else if (eOwner == TotemSlotOwner.NONE && eStat.Status != TotemMatchStatus.NOT_REQUIRED && SpellManager.GetSpellCooldownTimeLeft(eId) <= 0) { SpellManager.CastSpellByIdLUA(eId); _totemState = TotemPresetState.Called; _totemVerifyTime = (uint)Environment.TickCount + 1500; decision = "FALLBACK CAST"; reason = "Earth"; }
                 else if (wOwner == TotemSlotOwner.NONE && wStat.Status != TotemMatchStatus.NOT_REQUIRED && SpellManager.GetSpellCooldownTimeLeft(wId) <= 0) { SpellManager.CastSpellByIdLUA(wId); _totemState = TotemPresetState.Called; _totemVerifyTime = (uint)Environment.TickCount + 1500; decision = "FALLBACK CAST"; reason = "Water"; }
                 else if (aOwner == TotemSlotOwner.NONE && aStat.Status != TotemMatchStatus.NOT_REQUIRED && SpellManager.GetSpellCooldownTimeLeft(aId) <= 0) { SpellManager.CastSpellByIdLUA(aId); _totemState = TotemPresetState.Called; _totemVerifyTime = (uint)Environment.TickCount + 1500; decision = "FALLBACK CAST"; reason = "Air"; }
@@ -3040,10 +3060,15 @@ public class Main : ICustomClass
                         decision = "BLOCK_BASE_CALL";
                         reason = "Global call deferred by active overrides, fallbacks not ready";
                     }
+                    else if (fOwner == TotemSlotOwner.SPECIAL_DPS)
+                    {
+                        decision = "BLOCK_BASE_CALL";
+                        reason = "Global call deferred by SPECIAL_DPS, fallbacks not ready";
+                    }
                     else
                     {
                         decision = "WAIT";
-                        reason = "Fallback cooldowns";
+                        reason = "Base incomplete, fallbacks unavailable/cooldown";
                     }
                 }
             }
@@ -3065,6 +3090,9 @@ public class Main : ICustomClass
             "CALL_REASON=" + callReason + "\n" +
             "OVERRIDE_COUNT=" + overrideCount + "\n" +
             "OVERRIDE_SLOTS=" + (oEarth.Active ? "EARTH " : "") + (oWater.Active ? "WATER " : "") + (oAir.Active ? "AIR " : "") + "\n\n" +
+            "[TOTEM FSM POLICY]\n\n" +
+            "FSM_DECISION=" + decision + "\n" +
+            "FSM_REASON=" + reason + "\n\n" +
             "[TOTEM DPS POLICY]\n\n" +
             "BASE_VALID=" + ((fOwner == TotemSlotOwner.BASE || fStat.Status == TotemMatchStatus.NOT_REQUIRED) && (eOwner == TotemSlotOwner.BASE || eStat.Status == TotemMatchStatus.NOT_REQUIRED) && (wOwner == TotemSlotOwner.BASE || wStat.Status == TotemMatchStatus.NOT_REQUIRED) && (aOwner == TotemSlotOwner.BASE || aStat.Status == TotemMatchStatus.NOT_REQUIRED)).ToString() + "\n" +
             "OVERRIDE_ACTIVE=" + (overrideCount > 0).ToString() + "\n" +
