@@ -2784,6 +2784,17 @@ public class Main : ICustomClass
         
         s.ActualIdSource = "UNAVAILABLE"; // 3.3.5 GetTotemInfo does not provide raw ID
 
+        // SPECIAL DPS EXCEPTION (Task #03) - Fire Elemental satisfies the Base Fire slot to prevent verification loops
+        string fireEleCanonical = NormalizeTotemName(Lua.LuaDoString<string>("return GetSpellInfo(2894) or ''", ""));
+        if (slot == 1 && s.ActualNormalized != "" && s.ActualNormalized == fireEleCanonical)
+        {
+            s.Status = TotemMatchStatus.MATCH;
+            s.MatchMethod = "SPECIAL_DPS";
+            s.RankCheck = "NOT_APPLICABLE";
+            s.ActualIdSource = "NONE";
+            return s;
+        }
+
         if (s.ExpectedNormalized == s.ActualNormalized)
         {
             if (s.ExpectedRank > 0 && s.ActualRank > 0)
@@ -2853,6 +2864,23 @@ public class Main : ICustomClass
         return false; 
     }
 
+    private string GetActiveUtilityOverride(int slot)
+    {
+        string lua = @"
+            local have, name = GetTotemInfo(" + slot + @")
+            if not have or name == nil or name == '' then return '' end
+            if " + slot + @" == 2 then
+                if name == GetSpellInfo(8143) or name == GetSpellInfo(2484) or name == GetSpellInfo(5730) or name == GetSpellInfo(2062) then return name end
+            elseif " + slot + @" == 3 then
+                if name == GetSpellInfo(8170) or name == GetSpellInfo(16190) or name == GetSpellInfo(8166) then return name end
+            elseif " + slot + @" == 4 then
+                if name == GetSpellInfo(8177) then return name end
+            end
+            return ''
+        ";
+        return Lua.LuaDoString<string>(lua, "");
+    }
+
     private bool State_TotemBasePreset(ConfigCache c, bool isResto)
     {
         uint eId = ResolveSpell(isResto ? c.Resto.ActiveEarthTotem : c.Ele.ActiveEarthTotem);
@@ -2907,24 +2935,36 @@ public class Main : ICustomClass
         TotemSlotStatus wStat = GetTotemSlotStatus(3, isResto ? c.Resto.ActiveWaterTotem : c.Ele.ActiveWaterTotem);
         TotemSlotStatus aStat = GetTotemSlotStatus(4, isResto ? c.Resto.ActiveAirTotem : c.Ele.ActiveAirTotem);
 
+        string oFire = GetActiveUtilityOverride(1);
+        string oEarth = GetActiveUtilityOverride(2);
+        string oWater = GetActiveUtilityOverride(3);
+        string oAir = GetActiveUtilityOverride(4);
+
         int requiredCount = 0;
         int matchCount = 0;
         int wrongCount = 0;
         int missingCount = 0;
         int notRequiredCount = 0;
+        int overrideCount = 0;
 
-        if (fStat.Status == TotemMatchStatus.NOT_REQUIRED) notRequiredCount++; else { requiredCount++; if (fStat.Status == TotemMatchStatus.MATCH) matchCount++; else if (fStat.Status == TotemMatchStatus.WRONG) wrongCount++; else if (fStat.Status == TotemMatchStatus.MISSING) missingCount++; }
-        if (eStat.Status == TotemMatchStatus.NOT_REQUIRED) notRequiredCount++; else { requiredCount++; if (eStat.Status == TotemMatchStatus.MATCH) matchCount++; else if (eStat.Status == TotemMatchStatus.WRONG) wrongCount++; else if (eStat.Status == TotemMatchStatus.MISSING) missingCount++; }
-        if (wStat.Status == TotemMatchStatus.NOT_REQUIRED) notRequiredCount++; else { requiredCount++; if (wStat.Status == TotemMatchStatus.MATCH) matchCount++; else if (wStat.Status == TotemMatchStatus.WRONG) wrongCount++; else if (wStat.Status == TotemMatchStatus.MISSING) missingCount++; }
-        if (aStat.Status == TotemMatchStatus.NOT_REQUIRED) notRequiredCount++; else { requiredCount++; if (aStat.Status == TotemMatchStatus.MATCH) matchCount++; else if (aStat.Status == TotemMatchStatus.WRONG) wrongCount++; else if (aStat.Status == TotemMatchStatus.MISSING) missingCount++; }
+        if (oFire != "") overrideCount++; else if (fStat.Status == TotemMatchStatus.NOT_REQUIRED) notRequiredCount++; else { requiredCount++; if (fStat.Status == TotemMatchStatus.MATCH) matchCount++; else if (fStat.Status == TotemMatchStatus.WRONG) wrongCount++; else if (fStat.Status == TotemMatchStatus.MISSING) missingCount++; }
+        if (oEarth != "") overrideCount++; else if (eStat.Status == TotemMatchStatus.NOT_REQUIRED) notRequiredCount++; else { requiredCount++; if (eStat.Status == TotemMatchStatus.MATCH) matchCount++; else if (eStat.Status == TotemMatchStatus.WRONG) wrongCount++; else if (eStat.Status == TotemMatchStatus.MISSING) missingCount++; }
+        if (oWater != "") overrideCount++; else if (wStat.Status == TotemMatchStatus.NOT_REQUIRED) notRequiredCount++; else { requiredCount++; if (wStat.Status == TotemMatchStatus.MATCH) matchCount++; else if (wStat.Status == TotemMatchStatus.WRONG) wrongCount++; else if (wStat.Status == TotemMatchStatus.MISSING) missingCount++; }
+        if (oAir != "") overrideCount++; else if (aStat.Status == TotemMatchStatus.NOT_REQUIRED) notRequiredCount++; else { requiredCount++; if (aStat.Status == TotemMatchStatus.MATCH) matchCount++; else if (aStat.Status == TotemMatchStatus.WRONG) wrongCount++; else if (aStat.Status == TotemMatchStatus.MISSING) missingCount++; }
 
         bool missingAny = matchCount < requiredCount;
+        bool anyOverrideActive = (overrideCount > 0);
+
+        string fOwner = (oFire != "") ? "OVERRIDE (" + oFire + ")" : "BASE";
+        string eOwner = (oEarth != "") ? "OVERRIDE (" + oEarth + ")" : "BASE";
+        string wOwner = (oWater != "") ? "OVERRIDE (" + oWater + ")" : "BASE";
+        string aOwner = (oAir != "") ? "OVERRIDE (" + oAir + ")" : "BASE";
 
         string trace = "[TOTEM MANAGER]\n";
         trace += "STATE=" + _totemState + "\n";
         trace += "REQUIRED_COUNT=" + requiredCount + "\nMATCH_COUNT=" + matchCount + "\nWRONG_COUNT=" + wrongCount + "\nMISSING_COUNT=" + missingCount + "\nNOT_REQUIRED_COUNT=" + notRequiredCount + "\n";
         trace += "CALL_ID=" + callId + "\n";
-        bool anyOverrideActive = HasActiveTotemOverride(eId, fId, wId, aId);
+        
         trace += "CALL_READY=" + (callId != 0 && SpellManager.GetSpellCooldownTimeLeft(callId) <= 0) + "\n";
         trace += "OVERRIDE=" + anyOverrideActive + "\n";
         trace += "MOVING=" + moving + "\n";
@@ -2962,11 +3002,11 @@ public class Main : ICustomClass
             }
             else
             {
-                FTLine("[TOTEM VERIFY]\n\nSLOT=FIRE\nEXPECTED_RAW=" + (isResto ? c.Resto.ActiveFireTotem : c.Ele.ActiveFireTotem) + "\nEXPECTED_NORMALIZED=" + fStat.ExpectedNormalized + "\nEXPECTED_ID=" + fStat.ExpectedId + "\nEXPECTED_RANK=" + fStat.ExpectedRank + "\nACTUAL_ID=" + fStat.ActualId + "\nACTUAL_RAW=" + fStat.ActualName + "\nACTUAL_NORMALIZED=" + fStat.ActualNormalized + "\nACTUAL_RANK=" + fStat.ActualRank + "\nSTATUS=" + fStat.Status + "\nMATCH_METHOD=" + fStat.MatchMethod + "\nRANK_CHECK=" + fStat.RankCheck + "\nACTUAL_ID_SOURCE=" + fStat.ActualIdSource + "\n");
-                FTLine("SLOT=EARTH\nEXPECTED_RAW=" + (isResto ? c.Resto.ActiveEarthTotem : c.Ele.ActiveEarthTotem) + "\nEXPECTED_NORMALIZED=" + eStat.ExpectedNormalized + "\nEXPECTED_ID=" + eStat.ExpectedId + "\nEXPECTED_RANK=" + eStat.ExpectedRank + "\nACTUAL_ID=" + eStat.ActualId + "\nACTUAL_RAW=" + eStat.ActualName + "\nACTUAL_NORMALIZED=" + eStat.ActualNormalized + "\nACTUAL_RANK=" + eStat.ActualRank + "\nSTATUS=" + eStat.Status + "\nMATCH_METHOD=" + eStat.MatchMethod + "\nRANK_CHECK=" + eStat.RankCheck + "\nACTUAL_ID_SOURCE=" + eStat.ActualIdSource + "\n");
-                FTLine("SLOT=WATER\nEXPECTED_RAW=" + (isResto ? c.Resto.ActiveWaterTotem : c.Ele.ActiveWaterTotem) + "\nEXPECTED_NORMALIZED=" + wStat.ExpectedNormalized + "\nEXPECTED_ID=" + wStat.ExpectedId + "\nEXPECTED_RANK=" + wStat.ExpectedRank + "\nACTUAL_ID=" + wStat.ActualId + "\nACTUAL_RAW=" + wStat.ActualName + "\nACTUAL_NORMALIZED=" + wStat.ActualNormalized + "\nACTUAL_RANK=" + wStat.ActualRank + "\nSTATUS=" + wStat.Status + "\nMATCH_METHOD=" + wStat.MatchMethod + "\nRANK_CHECK=" + wStat.RankCheck + "\nACTUAL_ID_SOURCE=" + wStat.ActualIdSource + "\n");
-                FTLine("SLOT=AIR\nEXPECTED_RAW=" + (isResto ? c.Resto.ActiveAirTotem : c.Ele.ActiveAirTotem) + "\nEXPECTED_NORMALIZED=" + aStat.ExpectedNormalized + "\nEXPECTED_ID=" + aStat.ExpectedId + "\nEXPECTED_RANK=" + aStat.ExpectedRank + "\nACTUAL_ID=" + aStat.ActualId + "\nACTUAL_RAW=" + aStat.ActualName + "\nACTUAL_NORMALIZED=" + aStat.ActualNormalized + "\nACTUAL_RANK=" + aStat.ActualRank + "\nSTATUS=" + aStat.Status + "\nMATCH_METHOD=" + aStat.MatchMethod + "\nRANK_CHECK=" + aStat.RankCheck + "\nACTUAL_ID_SOURCE=" + aStat.ActualIdSource + "\n");
-                FTLine("REQUIRED_COUNT=" + requiredCount + "\nMATCH_COUNT=" + matchCount + "\nWRONG_COUNT=" + wrongCount + "\nMISSING_COUNT=" + missingCount + "\nNOT_REQUIRED_COUNT=" + notRequiredCount + "\nUNKNOWN_COUNT=0\n\nRESULT=" + (!missingAny ? "VERIFIED" : "NOT VERIFIED"));
+                FTLine("SLOT=FIRE\nEXPECTED_RAW=" + (isResto ? c.Resto.ActiveFireTotem : c.Ele.ActiveFireTotem) + "\nEXPECTED_NORMALIZED=" + fStat.ExpectedNormalized + "\nEXPECTED_ID=" + fStat.ExpectedId + "\nEXPECTED_RANK=" + fStat.ExpectedRank + "\nACTUAL_ID=" + fStat.ActualId + "\nACTUAL_RAW=" + fStat.ActualName + "\nACTUAL_NORMALIZED=" + fStat.ActualNormalized + "\nACTUAL_RANK=" + fStat.ActualRank + "\nSTATUS=" + fStat.Status + "\nMATCH_METHOD=" + fStat.MatchMethod + "\nRANK_CHECK=" + fStat.RankCheck + "\nACTUAL_ID_SOURCE=" + fStat.ActualIdSource + "\n");
+                FTLine("SLOT=EARTH\nOWNER=" + eOwner + "\nEXPECTED_RAW=" + (isResto ? c.Resto.ActiveEarthTotem : c.Ele.ActiveEarthTotem) + "\nEXPECTED_NORMALIZED=" + eStat.ExpectedNormalized + "\nEXPECTED_ID=" + eStat.ExpectedId + "\nEXPECTED_RANK=" + eStat.ExpectedRank + "\nACTUAL_ID=" + eStat.ActualId + "\nACTUAL_RAW=" + eStat.ActualName + "\nACTUAL_NORMALIZED=" + eStat.ActualNormalized + "\nACTUAL_RANK=" + eStat.ActualRank + "\nSTATUS=" + eStat.Status + "\nMATCH_METHOD=" + eStat.MatchMethod + "\nRANK_CHECK=" + eStat.RankCheck + "\nACTUAL_ID_SOURCE=" + eStat.ActualIdSource + "\n");
+                FTLine("SLOT=WATER\nOWNER=" + wOwner + "\nEXPECTED_RAW=" + (isResto ? c.Resto.ActiveWaterTotem : c.Ele.ActiveWaterTotem) + "\nEXPECTED_NORMALIZED=" + wStat.ExpectedNormalized + "\nEXPECTED_ID=" + wStat.ExpectedId + "\nEXPECTED_RANK=" + wStat.ExpectedRank + "\nACTUAL_ID=" + wStat.ActualId + "\nACTUAL_RAW=" + wStat.ActualName + "\nACTUAL_NORMALIZED=" + wStat.ActualNormalized + "\nACTUAL_RANK=" + wStat.ActualRank + "\nSTATUS=" + wStat.Status + "\nMATCH_METHOD=" + wStat.MatchMethod + "\nRANK_CHECK=" + wStat.RankCheck + "\nACTUAL_ID_SOURCE=" + wStat.ActualIdSource + "\n");
+                FTLine("SLOT=AIR\nOWNER=" + aOwner + "\nEXPECTED_RAW=" + (isResto ? c.Resto.ActiveAirTotem : c.Ele.ActiveAirTotem) + "\nEXPECTED_NORMALIZED=" + aStat.ExpectedNormalized + "\nEXPECTED_ID=" + aStat.ExpectedId + "\nEXPECTED_RANK=" + aStat.ExpectedRank + "\nACTUAL_ID=" + aStat.ActualId + "\nACTUAL_RAW=" + aStat.ActualName + "\nACTUAL_NORMALIZED=" + aStat.ActualNormalized + "\nACTUAL_RANK=" + aStat.ActualRank + "\nSTATUS=" + aStat.Status + "\nMATCH_METHOD=" + aStat.MatchMethod + "\nRANK_CHECK=" + aStat.RankCheck + "\nACTUAL_ID_SOURCE=" + aStat.ActualIdSource + "\n");
+                FTLine("REQUIRED_COUNT=" + requiredCount + "\nMATCH_COUNT=" + matchCount + "\nWRONG_COUNT=" + wrongCount + "\nMISSING_COUNT=" + missingCount + "\nNOT_REQUIRED_COUNT=" + notRequiredCount + "\nOVERRIDE_COUNT=" + overrideCount + "\nUNKNOWN_COUNT=0\n\nRESULT=" + (!missingAny ? "VERIFIED" : "NOT VERIFIED"));
                 if (missingAny)
                 {
                     _totemState = TotemPresetState.ReadyToCall;
@@ -3002,12 +3042,7 @@ public class Main : ICustomClass
                 reason = "Waiting for combat to start.";
                 blockDps = false;
             }
-            else if (anyOverrideActive) // Only checking true overrides, NOT Fire Ele
-            {
-                decision = "OVERRIDE ACTIVE";
-                reason = "True override blocks Base restore";
-                blockDps = false; // Overrides shouldn't permanently block DPS if they are intentional
-            }
+
             else if (moving)
             {
                 decision = "WAIT";
