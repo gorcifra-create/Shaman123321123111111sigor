@@ -2143,17 +2143,12 @@ public class Main : ICustomClass
 		}
 	}
 
-	private bool IsEffectiveCombat()
+    private bool IsEffectiveCombat()
     {
-        if (ObjectManager.Me.InCombatFlagOnly) return true;
-        WoWUnit target = ObjectManager.Target;
-        if (target != null && target.IsValid && target.IsAlive && target.IsAttackable)
-        {
-            if (target.Target == ObjectManager.Me.Guid) return true;
-            if (Lua.LuaDoString<bool>("return IsCurrentSpell(6603);")) return true;
-            if (Lua.LuaDoString<bool>("return UnitDebuff('target', GetSpellInfo(8050), 'PLAYER') ~= nil or UnitDebuff('target', GetSpellInfo(49233), 'PLAYER') ~= nil;")) return true;
-        }
-        return false;
+        // 05. COMBAT DETECTION: Canonical Combat Source
+        // The ONLY reliable source of combat truth is the game engine.
+        // False positives from Target aggro, Auto-attack, or Debuffs cause stale states and logic oscillation.
+        return ObjectManager.Me.InCombatFlagOnly;
     }
     
     private void FSM_Tick()
@@ -2173,8 +2168,15 @@ public class Main : ICustomClass
         bool isEle = c.Common.SelectedSpec.Contains("Ele");
 
         FT("[COMBAT TRACE]");
-        FTLine("InCombatFlagOnly=" + ObjectManager.Me.InCombatFlagOnly);
-        FTLine("EffectiveCombat=" + inCombat);
+        FTLine("FSMTick=" + _fsmTickId);
+        FTLine("COMBAT=" + inCombat);
+        FTLine("ENGINE=" + ObjectManager.Me.InCombatFlagOnly);
+        WoWUnit currentTarget = ObjectManager.Target;
+        FTLine("TARGET_VALID=" + (currentTarget != null && currentTarget.IsValid));
+        FTLine("TARGET_ALIVE=" + (currentTarget != null && currentTarget.IsAlive));
+        FTLine("TARGET_ATTACKABLE=" + (currentTarget != null && currentTarget.IsAttackable));
+        FTLine("PLAYER_DEAD=" + !ObjectManager.Me.IsAlive);
+        FTLine("REASON=EngineFlagOnly");
         
         if (!inCombat)
         {
@@ -2558,7 +2560,7 @@ public class Main : ICustomClass
 				}
 			}
 		}
-		if (c.Common.EnableRegen && ((WoWUnit)ObjectManager.Me).InCombatFlagOnly)
+		if (c.Common.EnableRegen && IsEffectiveCombat())
 		{
 			if (c.Common.UseFelHealthstone && ((WoWUnit)ObjectManager.Me).HealthPercent <= (double)c.Common.HpRegenPct && !HasExpectedState("Healthstone") && ItemsManager.HasItemById(36892u) && Lua.LuaDoString<bool>("local s,d = GetItemCooldown(36892); return d == 0;", ""))
 			{
@@ -3198,7 +3200,7 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
 		{
 			return false;
 		}
-		bool inCombatFlagOnly = ((WoWUnit)ObjectManager.Me).InCombatFlagOnly;
+		bool inCombatFlagOnly = IsEffectiveCombat();
 		bool inMovement = MovementManager.InMovement;
 		FTLine("combat=" + inCombatFlagOnly + " moving=" + inMovement);
 		if (c.Common.TotemRecall && !inCombatFlagOnly && c.Common.TotemAliveTime > 0)
