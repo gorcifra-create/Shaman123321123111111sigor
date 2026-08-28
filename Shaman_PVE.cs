@@ -3380,7 +3380,7 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
         FT("[ELE FULL] State_CoreRotation_Ele");
         
         WoWUnit currentTarget = ObjectManager.Target;
-        WoWUnit combatTarget = GetCombatTarget(); // 06.1 Target Ownership: Default fallback range
+        WoWUnit combatTarget = GetCombatTarget(30f);
         
         if (combatTarget == null)
         {
