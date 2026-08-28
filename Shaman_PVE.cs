@@ -15,6 +15,13 @@ using wManager.Wow.ObjectManager;
 [assembly: RuntimeCompatibility(WrapNonExceptionThrows = true)]
 [assembly: CompilationRelaxations(8)]
 [assembly: AssemblyVersion("0.0.0.0")]
+public enum TotemRestoreAction
+{
+    NONE,
+    GLOBAL_CALL,
+    PARTIAL_FALLBACK
+}
+
 public class Main : ICustomClass
 {
 	private struct ShamanCapabilities
@@ -601,7 +608,12 @@ public class Main : ICustomClass
 	private static uint _panicDeadline = 0u;
 
 	private static int _callFailCount = 0;
-	private static TotemPresetState _totemState = TotemPresetState.Dirty;
+	private static TotemPresetState _totemState = TotemPresetState.Dirty;
+    private static TotemRestoreAction _lastRestoreAction = TotemRestoreAction.NONE;
+    private static bool _lastDpsPolicyAllow = false;
+    private static bool _lastBaseVerified = false;
+    private static bool _lastOverrideActive = false;
+    private static string _lastDpsReason = "";
 
 	private static uint _totemVerifyTime = 0u;
 
@@ -2219,12 +2231,29 @@ public class Main : ICustomClass
         if (totemBase) { FT("FSM_TICK END"); return; }
 
         FT("[DPS GATE]");
-        FTLine("STATE=" + _totemState);
-        bool dpsGateOpen = _totemState == TotemPresetState.Verified;
+        FTLine("TOTEM_STATE=" + _totemState.ToString());
+        FTLine("RESTORE_ACTION=" + _lastRestoreAction.ToString());
+        FTLine("BASE_VERIFIED=" + _lastBaseVerified.ToString());
+        FTLine("OVERRIDE_ACTIVE=" + _lastOverrideActive.ToString());
+        FTLine("DPS_RESULT=" + (_lastDpsPolicyAllow ? "ALLOW" : "BLOCK"));
+        FTLine("DPS_REASON=" + _lastDpsReason);
+        
+        bool dpsGateOpen = false;
+        if (_totemState == TotemPresetState.Verified) {
+            dpsGateOpen = true;
+        } else if (_totemState == TotemPresetState.ReadyToCall) {
+            dpsGateOpen = _lastDpsPolicyAllow;
+        } else if (_totemState == TotemPresetState.Called) {
+            if (_lastRestoreAction == TotemRestoreAction.PARTIAL_FALLBACK) {
+                dpsGateOpen = _lastDpsPolicyAllow;
+            } else {
+                dpsGateOpen = false;
+            }
+        }
         
         if (dpsGateOpen)
         {
-            FTLine("RESULT=OPEN");
+            FTLine("RESULT=OPEN (DPS Allowed)");
             FTStateStart("State_BuffsAndTotems");
             bool buffs = State_BuffsAndTotems(c, isResto);
             FTResult("State_BuffsAndTotems", buffs);
@@ -2246,7 +2275,7 @@ public class Main : ICustomClass
         }
         else
         {
-            FTLine("RESULT=CLOSED (Waiting for Totems)");
+            FTLine("RESULT=CLOSED (Waiting for Global Call)");
         }
 
         FT("FSM_TICK END");
@@ -3009,6 +3038,7 @@ public class Main : ICustomClass
             if (!baseVerified)
             {
                 _totemState = TotemPresetState.ReadyToCall;
+                _lastRestoreAction = TotemRestoreAction.NONE;
                 decision = "LOSS DETECTED";
                 reason = "Base totem lost";
                 FTLine("[TOTEM STATE] Verified -> LOSS DETECTED -> ReadyToCall");
@@ -3025,6 +3055,7 @@ public class Main : ICustomClass
             if (baseVerified)
             {
                 _totemState = TotemPresetState.Verified;
+                _lastRestoreAction = TotemRestoreAction.NONE;
                 decision = "STATE TRANSITION";
                 reason = "Base totems restored";
                 FTLine("[TOTEM STATE] ReadyToCall -> Verified");
@@ -3040,9 +3071,11 @@ public class Main : ICustomClass
                 {
                     SpellManager.CastSpellByIdLUA(callId);
                     _totemState = TotemPresetState.Called;
+                    _lastRestoreAction = TotemRestoreAction.GLOBAL_CALL;
                     _totemVerifyTime = (uint)Environment.TickCount + 1500;
                     decision = "CALL_OF_THE_ELEMENTS";
                     reason = "Missing base totems, casting global Call";
+                    FTLine("\n[TOTEM RESTORE ACTION]\nACTION=GLOBAL_CALL\nSLOT=ALL\nSPELL=Call of the Elements\nREASON=" + reason + "\nFSM_STATE=Called\nBASE_VERIFIED=" + baseVerified + "\nDPS_RESULT=" + (dpsAllowed ? "ALLOW" : "BLOCK") + "\n");
                 }
                 else
                 {
@@ -3053,10 +3086,10 @@ public class Main : ICustomClass
             else
             {
                 // Fallbacks
-                if (fOwner == TotemSlotOwner.NONE && fStat.Status != TotemMatchStatus.NOT_REQUIRED && SpellManager.GetSpellCooldownTimeLeft(fId) <= 0) { SpellManager.CastSpellByIdLUA(fId); _totemState = TotemPresetState.Called; _totemVerifyTime = (uint)Environment.TickCount + 1500; decision = "FALLBACK CAST"; reason = "Fire"; }
-                else if (eOwner == TotemSlotOwner.NONE && eStat.Status != TotemMatchStatus.NOT_REQUIRED && SpellManager.GetSpellCooldownTimeLeft(eId) <= 0) { SpellManager.CastSpellByIdLUA(eId); _totemState = TotemPresetState.Called; _totemVerifyTime = (uint)Environment.TickCount + 1500; decision = "FALLBACK CAST"; reason = "Earth"; }
-                else if (wOwner == TotemSlotOwner.NONE && wStat.Status != TotemMatchStatus.NOT_REQUIRED && SpellManager.GetSpellCooldownTimeLeft(wId) <= 0) { SpellManager.CastSpellByIdLUA(wId); _totemState = TotemPresetState.Called; _totemVerifyTime = (uint)Environment.TickCount + 1500; decision = "FALLBACK CAST"; reason = "Water"; }
-                else if (aOwner == TotemSlotOwner.NONE && aStat.Status != TotemMatchStatus.NOT_REQUIRED && SpellManager.GetSpellCooldownTimeLeft(aId) <= 0) { SpellManager.CastSpellByIdLUA(aId); _totemState = TotemPresetState.Called; _totemVerifyTime = (uint)Environment.TickCount + 1500; decision = "FALLBACK CAST"; reason = "Air"; }
+                if (fOwner == TotemSlotOwner.NONE && fStat.Status != TotemMatchStatus.NOT_REQUIRED && SpellManager.GetSpellCooldownTimeLeft(fId) <= 0) { SpellManager.CastSpellByIdLUA(fId); _totemState = TotemPresetState.Called; _lastRestoreAction = TotemRestoreAction.PARTIAL_FALLBACK; _totemVerifyTime = (uint)Environment.TickCount + 1500; decision = "FALLBACK CAST"; reason = "Fire"; FTLine("\n[TOTEM RESTORE ACTION]\nACTION=PARTIAL_FALLBACK\nSLOT=FIRE\nSPELL=" + fStat.ExpectedName + "\nREASON=Base Missing\nFSM_STATE=Called\nBASE_VERIFIED=" + baseVerified + "\nDPS_RESULT=" + (dpsAllowed ? "ALLOW" : "BLOCK") + "\n"); }
+                else if (eOwner == TotemSlotOwner.NONE && eStat.Status != TotemMatchStatus.NOT_REQUIRED && SpellManager.GetSpellCooldownTimeLeft(eId) <= 0) { SpellManager.CastSpellByIdLUA(eId); _totemState = TotemPresetState.Called; _lastRestoreAction = TotemRestoreAction.PARTIAL_FALLBACK; _totemVerifyTime = (uint)Environment.TickCount + 1500; decision = "FALLBACK CAST"; reason = "Earth"; FTLine("\n[TOTEM RESTORE ACTION]\nACTION=PARTIAL_FALLBACK\nSLOT=EARTH\nSPELL=" + eStat.ExpectedName + "\nREASON=Base Missing\nFSM_STATE=Called\nBASE_VERIFIED=" + baseVerified + "\nDPS_RESULT=" + (dpsAllowed ? "ALLOW" : "BLOCK") + "\n"); }
+                else if (wOwner == TotemSlotOwner.NONE && wStat.Status != TotemMatchStatus.NOT_REQUIRED && SpellManager.GetSpellCooldownTimeLeft(wId) <= 0) { SpellManager.CastSpellByIdLUA(wId); _totemState = TotemPresetState.Called; _lastRestoreAction = TotemRestoreAction.PARTIAL_FALLBACK; _totemVerifyTime = (uint)Environment.TickCount + 1500; decision = "FALLBACK CAST"; reason = "Water"; FTLine("\n[TOTEM RESTORE ACTION]\nACTION=PARTIAL_FALLBACK\nSLOT=WATER\nSPELL=" + wStat.ExpectedName + "\nREASON=Base Missing\nFSM_STATE=Called\nBASE_VERIFIED=" + baseVerified + "\nDPS_RESULT=" + (dpsAllowed ? "ALLOW" : "BLOCK") + "\n"); }
+                else if (aOwner == TotemSlotOwner.NONE && aStat.Status != TotemMatchStatus.NOT_REQUIRED && SpellManager.GetSpellCooldownTimeLeft(aId) <= 0) { SpellManager.CastSpellByIdLUA(aId); _totemState = TotemPresetState.Called; _lastRestoreAction = TotemRestoreAction.PARTIAL_FALLBACK; _totemVerifyTime = (uint)Environment.TickCount + 1500; decision = "FALLBACK CAST"; reason = "Air"; FTLine("\n[TOTEM RESTORE ACTION]\nACTION=PARTIAL_FALLBACK\nSLOT=AIR\nSPELL=" + aStat.ExpectedName + "\nREASON=Base Missing\nFSM_STATE=Called\nBASE_VERIFIED=" + baseVerified + "\nDPS_RESULT=" + (dpsAllowed ? "ALLOW" : "BLOCK") + "\n"); }
                 else
                 {
                     if (overrideCount > 0)
@@ -3109,6 +3142,7 @@ public class Main : ICustomClass
             "SPECIAL_DPS=" + isFireEleActive.ToString() + "\n" +
             "DPS_RESULT=" + (dpsAllowed ? "ALLOW" : "BLOCK") + "\n" +
             "RESTORE_RESULT=" + (decision == "DEFER" ? "DEFER" : (decision == "CALL_OF_THE_ELEMENTS" || decision == "FALLBACK CAST" ? "ALLOW" : "NONE")) + "\n" +
+            "RESTORE_ACTION=" + _lastRestoreAction.ToString() + "\n" +
             "FSM_DECISION=" + decision + "\n" +
             "FSM_REASON=" + reason;
 
