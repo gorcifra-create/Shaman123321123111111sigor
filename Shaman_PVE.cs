@@ -2337,6 +2337,15 @@ public class Main : ICustomClass
 		return 0f;
 	}
 
+		private void SafeSetTarget(WoWUnit target)
+	{
+		if (target != null && ((WoWObject)target).IsValid)
+		{
+			((WoWUnit)ObjectManager.Me).Target = ((WoWObject)target).Guid;
+			wManager.Wow.Helpers.Interact.InteractGameObject(((WoWObject)target).GetBaseAddress, false, true);
+		}
+	}
+
 	private WoWUnit GetCombatTarget(float fallbackRange = 40f)
 	{
 		WoWUnit target = ObjectManager.Target;
@@ -2499,7 +2508,7 @@ public class Main : ICustomClass
 				if (((WoWUnit)ObjectManager.Me).Target != ((WoWObject)combatTarget).Guid)
 				{
 					FTLine("[TARGET SWITCH] FSMTick=" + _fsmTickId + " FROM=" + (((WoWUnit)ObjectManager.Me).Target) + " TO=" + combatTarget.Name + " REASON=Wind Shear Target Sync");
-					((WoWUnit)ObjectManager.Me).Target = ((WoWObject)combatTarget).Guid;
+					SafeSetTarget(combatTarget);
 					return false;
 				}
 				SpellManager.CastSpellByIdLUA(num);
@@ -2587,7 +2596,7 @@ public class Main : ICustomClass
 			if (((WoWUnit)ObjectManager.Me).Target != ((WoWObject)combatTarget).Guid)
 				{
 					FTLine("[TARGET SWITCH] FSMTick=" + _fsmTickId + " FROM=" + (((WoWUnit)ObjectManager.Me).Target) + " TO=" + combatTarget.Name + " REASON=Wind Shear Target Sync");
-					((WoWUnit)ObjectManager.Me).Target = ((WoWObject)combatTarget).Guid;
+					SafeSetTarget(combatTarget);
 					return false;
 				}
 			if (Lua.LuaDoString<bool>("for i=1,40 do local name,_,_,_,type = UnitBuff('target', i); if name and (name == 'Power Word: Shield' or name == 'Ice Barrier' or name == 'Bloodlust' or name == 'Heroism' or name == 'Rejuvenation' or name == 'Regrowth' or (type == 'Magic' and UnitMana('player')/UnitManaMax('player') > 0.5)) then return true end end return false;", "") && ResolveSpell("purge") != 0 && SpellManager.GetSpellCooldownTimeLeft(ResolveSpell("purge")) <= 0 && !HasExpectedState("Purge" + ((WoWObject)combatTarget).Guid))
@@ -2664,7 +2673,7 @@ public class Main : ICustomClass
 			{
 				if (((WoWUnit)ObjectManager.Me).Target != ((WoWObject)val).Guid)
 				{
-					((WoWUnit)ObjectManager.Me).Target = ((WoWObject)val).Guid;
+					SafeSetTarget(val);
 					return true;
 				}
 				SpellManager.CastSpellByIdLUA(ResolveSpell("chain_heal"));
@@ -3391,7 +3400,7 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
         if (currentTarget == null || currentTarget.Guid != combatTarget.Guid)
         {
             FTLine("[TARGET SWITCH] FSMTick=" + _fsmTickId + " FROM=" + (currentTarget != null ? currentTarget.Name : "null") + " TO=" + combatTarget.Name + " REASON=Fallback Synchronization");
-            ObjectManager.Me.Target = combatTarget.Guid;
+            SafeSetTarget(combatTarget);
             FTLine("RETURN: Target Sync");
             return;
         }
@@ -3613,7 +3622,7 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
 			{
 				if (((WoWUnit)ObjectManager.Me).Target != ((WoWObject)tank).Guid)
 				{
-					((WoWUnit)ObjectManager.Me).Target = ((WoWObject)tank).Guid;
+					SafeSetTarget(tank);
 					return true;
 				}
 				SpellManager.CastSpellByIdLUA(ResolveSpell("earth_shield"));
@@ -3683,7 +3692,7 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
 				{
 					if (((WoWUnit)ObjectManager.Me).Target != ((WoWObject)val3).Guid)
 					{
-						((WoWUnit)ObjectManager.Me).Target = ((WoWObject)val3).Guid;
+						SafeSetTarget(val3);
 						return true;
 					}
 					if (_panicState == PanicState.CastNS)
@@ -3741,7 +3750,7 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
 				Logging.Write("[RESTO PANIC] Initiating NS Sequence on " + ((WoWObject)val4).Name);
 				if (((WoWUnit)ObjectManager.Me).Target != ((WoWObject)val4).Guid)
 				{
-					((WoWUnit)ObjectManager.Me).Target = ((WoWObject)val4).Guid;
+					SafeSetTarget(val4);
 					return true;
 				}
 				return true;
@@ -3754,7 +3763,7 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
 			{
 				if (((WoWUnit)ObjectManager.Me).Target != ((WoWObject)val5).Guid)
 				{
-					((WoWUnit)ObjectManager.Me).Target = ((WoWObject)val5).Guid;
+					SafeSetTarget(val5);
 					return true;
 				}
 				SpellManager.CastSpellByIdLUA(ResolveSpell("healing_wave"));
@@ -3858,7 +3867,7 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
 		{
 			if (((WoWUnit)ObjectManager.Me).Target != ((WoWObject)val6).Guid)
 			{
-				((WoWUnit)ObjectManager.Me).Target = ((WoWObject)val6).Guid;
+				SafeSetTarget(val6);
 				return true;
 			}
 			SpellManager.CastSpellByIdLUA(num6);
