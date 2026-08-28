@@ -3460,27 +3460,40 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
             _fireEleWaitStart = 0L;
         }
         
-        // Flame Shock
-        uint fsId = ResolveSpell("flame_shock");
-        bool fsKnown = fsId > 0;
-        float fsCd = fsKnown ? SpellManager.GetSpellCooldownTimeLeft(fsId) : -1f;
-        
-        bool hasFs = false;
-        float fsDuration = 0f;
-        if (fsKnown)
-        {
-            hasFs = Lua.LuaDoString<bool>("return UnitDebuff('target', GetSpellInfo(" + fsId + "), 'PLAYER') ~= nil;", "");
-            if (hasFs) fsDuration = Lua.LuaDoString<float>("local _,_,_,_,_,_,e = UnitDebuff('target', GetSpellInfo(" + fsId + "), 'PLAYER'); if e then return e - GetTime(); else return 0; end", "");
-        }
-        
-        bool needFs = fsKnown && fsCd <= 0 && (!hasFs || fsDuration < 2.0f);
-        if (c.Ele.UseFlameShock && needFs && !moving)
-        {
-            FTLine("ACTION CAST Flame Shock");
-            SpellManager.CastSpellByIdLUA(fsId);
-            FTLine("RETURN TRUE: ELE.FlameShock");
-            return;
-        }
+		// Flame Shock
+		uint fsId = ResolveSpell("flame_shock");
+		bool fsKnown = fsId > 0;
+		float fsCd = fsKnown ? SpellManager.GetSpellCooldownTimeLeft(fsId) : -1f;
+
+		bool hasFs = false;
+		float fsDuration = 0f;
+		if (fsKnown && combatTarget != null && ((WoWObject)combatTarget).IsValid)
+		{
+			wManager.Wow.Class.Aura fsAura = wManager.Wow.Helpers.BuffManager.GetAuras(((WoWObject)combatTarget).GetBaseAddress)
+				.FirstOrDefault(a => a.SpellId == fsId && a.Owner == ((WoWObject)ObjectManager.Me).Guid);
+			if (fsAura != null)
+			{
+				hasFs = true;
+				fsDuration = (float)(fsAura.TimeLeft) / 1000f; // Convert ms to seconds
+			}
+		}
+
+		float fsThreshold = 2.0f; // Configurable boundary
+		bool needFs = fsKnown && fsCd <= 0 && (!hasFs || fsDuration < fsThreshold);
+
+		// Anti-spam check for Immune/LOS failures
+		bool isFsBlocked = HasExpectedState("FlameShock_Attempt");
+
+		FTLine("[FLAME SHOCK] Target=" + combatTarget.Name + " HasFS=" + hasFs + " Remaining=" + fsDuration.ToString("0.0") + "s Threshold=" + fsThreshold.ToString("0.0") + "s NeedFS=" + needFs + " CD=" + fsCd + "ms Blocked=" + isFsBlocked);
+
+		if (c.Ele.UseFlameShock && needFs && !isFsBlocked)
+		{
+			FTLine("[FLAME SHOCK CAST] Target=" + combatTarget.Name + " REASON=" + (!hasFs ? "Missing" : "Refresh Window"));
+			SpellManager.CastSpellByIdLUA(fsId);
+			AddExpectedState("FlameShock_Attempt", 1500); // 1.5s Anti-Spam protection
+			FTLine("RETURN TRUE: ELE.FlameShock");
+			return;
+		}
         
         // Lava Burst
         uint lvbId = ResolveSpell("lava_burst");
