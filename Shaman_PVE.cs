@@ -2158,6 +2158,8 @@ public class Main : ICustomClass
     
     private void FSM_Tick()
     {
+        _fsmTickId++;
+        _policyValid = false;
         long traceId = _traceTick + 1;
         FT("============================================================");
         FT("FSM_TICK START");
