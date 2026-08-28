@@ -2244,6 +2244,9 @@ public class Main : ICustomClass
             if (_totemState == TotemPresetState.Called && _lastRestoreAction == TotemRestoreAction.GLOBAL_CALL) gateReason = "CLOSED (Waiting for Global Call API)";
         }
         
+        FTLine("FSMTick=" + _fsmTickId);
+        FTLine("PolicyTick=" + _policyTickId);
+        FTLine("PolicyValid=" + _policyValid.ToString());
         FTLine("FSM_STATE=" + _totemState.ToString());
         FTLine("RESTORE_ACTION=" + _lastRestoreAction.ToString());
         FTLine("BASE_VERIFIED=" + _lastBaseVerified.ToString());
