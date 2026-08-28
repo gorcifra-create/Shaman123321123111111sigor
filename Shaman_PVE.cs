@@ -613,6 +613,7 @@ public class Main : ICustomClass
     private static bool _lastDpsPolicyAllow = false;
     private static bool _lastBaseVerified = false;
     private static bool _lastOverrideActive = false;
+    private static bool _lastSpecialDpsActive = false;
     private static string _lastDpsReason = "";
 
 	private static uint _totemVerifyTime = 0u;
@@ -2231,18 +2232,32 @@ public class Main : ICustomClass
         if (totemBase) { FT("FSM_TICK END"); return; }
 
         FT("[DPS GATE]");
-        FTLine("TOTEM_STATE=" + _totemState.ToString());
+        
+        bool dpsGateOpen = IsBaseTotemReadyForDps();
+        string gateReason = "OPEN (DPS Allowed)";
+        if (!dpsGateOpen)
+        {
+            gateReason = "CLOSED (DPS Policy Blocked or Waiting for Call)";
+            if (_totemState == TotemPresetState.Called && _lastRestoreAction == TotemRestoreAction.GLOBAL_CALL) gateReason = "CLOSED (Waiting for Global Call API)";
+        }
+        
+        FTLine("FSM_STATE=" + _totemState.ToString());
         FTLine("RESTORE_ACTION=" + _lastRestoreAction.ToString());
         FTLine("BASE_VERIFIED=" + _lastBaseVerified.ToString());
         FTLine("OVERRIDE_ACTIVE=" + _lastOverrideActive.ToString());
-        FTLine("DPS_RESULT=" + (_lastDpsPolicyAllow ? "ALLOW" : "BLOCK"));
-        FTLine("DPS_REASON=" + _lastDpsReason);
+        FTLine("SPECIAL_DPS=" + _lastSpecialDpsActive.ToString());
+        FTLine("POLICY_RESULT=" + (_lastDpsPolicyAllow ? "ALLOW" : "BLOCK"));
+        FTLine("POLICY_REASON=" + _lastDpsReason);
+        FTLine("GATE_RESULT=" + (dpsGateOpen ? "OPEN" : "CLOSED"));
+        FTLine("GATE_REASON=" + gateReason);
         
-        bool dpsGateOpen = IsBaseTotemReadyForDps();
-        
+        if ((_lastDpsPolicyAllow && !dpsGateOpen && _totemState != TotemPresetState.Called && _lastRestoreAction != TotemRestoreAction.GLOBAL_CALL) || (!_lastDpsPolicyAllow && dpsGateOpen))
+        {
+            FTLine("[DPS GATE INVARIANT VIOLATION] Mismatch between POLICY and GATE!");
+        }
+
         if (dpsGateOpen)
         {
-            FTLine("RESULT=OPEN (DPS Allowed)");
             FTStateStart("State_BuffsAndTotems");
             bool buffs = State_BuffsAndTotems(c, isResto);
             FTResult("State_BuffsAndTotems", buffs);
@@ -2261,10 +2276,6 @@ public class Main : ICustomClass
                 State_CoreRotation_Ele(c);
                 FTStateEnd("State_CoreRotation_Ele");
             }
-        }
-        else
-        {
-            FTLine("RESULT=CLOSED (Waiting for Global Call)");
         }
 
         FT("FSM_TICK END");
@@ -3019,6 +3030,7 @@ public class Main : ICustomClass
         _lastDpsPolicyAllow = dpsAllowed;
         _lastDpsReason = dpsReason;
         _lastOverrideActive = overrideCount > 0;
+        _lastSpecialDpsActive = (owners[0] == TotemSlotOwner.SPECIAL_DPS || owners[1] == TotemSlotOwner.SPECIAL_DPS || owners[2] == TotemSlotOwner.SPECIAL_DPS || owners[3] == TotemSlotOwner.SPECIAL_DPS);
         bool blockDps = !dpsAllowed;
 
         string callReason;
