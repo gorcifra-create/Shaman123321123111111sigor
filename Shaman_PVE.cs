@@ -2337,17 +2337,17 @@ public class Main : ICustomClass
 		return 0f;
 	}
 
-	private WoWUnit GetCombatTarget(float range = 30f)
-	{
-		WoWUnit target = ObjectManager.Target;
-		if (target != null && ((WoWObject)target).IsValid && target.IsAlive && target.IsAttackable && ((WoWObject)target).GetDistance <= range)
-		{
-			return target;
-		}
-		return (from u in ObjectManager.GetObjectWoWUnit()
-			where ((WoWObject)u).IsValid && u.IsAlive && u.IsAttackable && ((WoWObject)u).GetDistance <= range
-			orderby ((WoWObject)u).GetDistance
-			select u).FirstOrDefault();
+	private WoWUnit GetCombatTarget(float fallbackRange = 40f)
+	{
+		WoWUnit target = ObjectManager.Target;
+		if (target != null && ((WoWObject)target).IsValid && target.IsAlive && target.IsAttackable)
+		{
+			return target;
+		}
+		return (from u in ObjectManager.GetObjectWoWUnit()
+			where ((WoWObject)u).IsValid && u.IsAlive && u.IsAttackable && ((WoWObject)u).GetDistance <= fallbackRange
+			orderby ((WoWObject)u).GetDistance
+			select u).FirstOrDefault();
 	}
 
 	private float CalcHealScore(WoWUnit p, WoWUnit tank, float spellHeal, ConfigCache c, float allowedOverhealPct, float castTime, float tankBias = 0f)
@@ -2496,10 +2496,11 @@ public class Main : ICustomClass
 			uint num = ResolveSpell("wind_shear");
 			if (num != 0 && SpellManager.GetSpellCooldownTimeLeft(num) <= 0)
 			{
-				if (((WoWUnit)ObjectManager.Me).Target != ((WoWObject)combatTarget).Guid)
-				{
-					((WoWUnit)ObjectManager.Me).Target = ((WoWObject)combatTarget).Guid;
-					return false;
+				if (((WoWUnit)ObjectManager.Me).Target != ((WoWObject)combatTarget).Guid)
+				{
+					FTLine("[TARGET SWITCH] FSMTick=" + _fsmTickId + " FROM=" + (((WoWUnit)ObjectManager.Me).Target) + " TO=" + combatTarget.Name + " REASON=Wind Shear Target Sync");
+					((WoWUnit)ObjectManager.Me).Target = ((WoWObject)combatTarget).Guid;
+					return false;
 				}
 				SpellManager.CastSpellByIdLUA(num);
 				Logging.Write("[REACT] Wind Shear (" + num + ")");
@@ -2583,11 +2584,12 @@ public class Main : ICustomClass
 		}
 		if (c.Common.UsePurge && combatTarget != null && combatTarget.IsAlive && combatTarget.IsAttackable && ((WoWUnit)ObjectManager.Me).ManaPercentage > 30)
 		{
-			if (((WoWUnit)ObjectManager.Me).Target != ((WoWObject)combatTarget).Guid)
-			{
-				((WoWUnit)ObjectManager.Me).Target = ((WoWObject)combatTarget).Guid;
-				return false;
-			}
+			if (((WoWUnit)ObjectManager.Me).Target != ((WoWObject)combatTarget).Guid)
+				{
+					FTLine("[TARGET SWITCH] FSMTick=" + _fsmTickId + " FROM=" + (((WoWUnit)ObjectManager.Me).Target) + " TO=" + combatTarget.Name + " REASON=Wind Shear Target Sync");
+					((WoWUnit)ObjectManager.Me).Target = ((WoWObject)combatTarget).Guid;
+					return false;
+				}
 			if (Lua.LuaDoString<bool>("for i=1,40 do local name,_,_,_,type = UnitBuff('target', i); if name and (name == 'Power Word: Shield' or name == 'Ice Barrier' or name == 'Bloodlust' or name == 'Heroism' or name == 'Rejuvenation' or name == 'Regrowth' or (type == 'Magic' and UnitMana('player')/UnitManaMax('player') > 0.5)) then return true end end return false;", "") && ResolveSpell("purge") != 0 && SpellManager.GetSpellCooldownTimeLeft(ResolveSpell("purge")) <= 0 && !HasExpectedState("Purge" + ((WoWObject)combatTarget).Guid))
 			{
 				SpellManager.CastSpellByIdLUA(ResolveSpell("purge"));
@@ -3388,9 +3390,9 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
         
         if (currentTarget == null || currentTarget.Guid != combatTarget.Guid)
         {
-            FTLine("TARGET SYNC: OLD=" + (currentTarget != null ? currentTarget.Name : "null") + " NEW=" + combatTarget.Name);
+            FTLine("[TARGET SWITCH] FSMTick=" + _fsmTickId + " FROM=" + (currentTarget != null ? currentTarget.Name : "null") + " TO=" + combatTarget.Name + " REASON=Fallback Synchronization");
             ObjectManager.Me.Target = combatTarget.Guid;
-            FTLine("RETURN TRUE: Target Sync");
+            FTLine("RETURN: Target Sync");
             return;
         }
         
