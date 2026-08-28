@@ -3219,7 +3219,7 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
 			return false;
 		}
 		bool inCombatFlagOnly = IsEffectiveCombat();
-		bool inMovement = MovementManager.InMovement;
+		bool inMovement = MovementManager.InMovement || ((wManager.Wow.ObjectManager.WoWPlayer)ObjectManager.Me).GetMove;
 		FTLine("combat=" + inCombatFlagOnly + " moving=" + inMovement);
 		if (c.Common.TotemRecall && !inCombatFlagOnly && c.Common.TotemAliveTime > 0)
 		{
@@ -3413,7 +3413,7 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
             return;
         }
         
-        bool moving = MovementManager.InMovement;
+        bool moving = MovementManager.InMovement || ((wManager.Wow.ObjectManager.WoWPlayer)ObjectManager.Me).GetMove;
         // EMERGENCY SELF HEAL (From AIO)
         if (ObjectManager.Me.HealthPercent < 50)
         {
