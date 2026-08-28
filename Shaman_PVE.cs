@@ -2466,22 +2466,29 @@ public class Main : ICustomClass
 		Logging.Write("[Shaman PVE] " + action);
 	}
 
-	private void AddExpectedState(string state, int durationMs = 500)
-	{
-		lock (_stateLock)
-		{
-			_expectedStates[state] = (uint)(Environment.TickCount + durationMs);
-		}
-	}
-
-	private bool HasExpectedState(string state)
-	{
-		lock (_stateLock)
-		{
-			return _expectedStates.ContainsKey(state);
-		}
-	}
-
+	private void AddExpectedState(string state, int durationMs = 500)
+	{
+		lock (_stateLock)
+		{
+			_expectedStates[state] = (uint)(Environment.TickCount + durationMs);
+		}
+	}
+
+	private bool HasExpectedState(string state)
+	{
+		lock (_stateLock)
+		{
+			if (!_expectedStates.ContainsKey(state)) return false;
+			// Auto-expire: compare as signed to handle uint wraparound
+			if ((int)(_expectedStates[state] - (uint)Environment.TickCount) <= 0)
+			{
+				_expectedStates.Remove(state);
+				return false;
+			}
+			return true;
+		}
+	}
+
 	private bool IsBaseTotemReadyForDps()
 	{
         if (_totemState == TotemPresetState.Verified) return true;
