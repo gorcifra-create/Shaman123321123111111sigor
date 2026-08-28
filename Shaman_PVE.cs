@@ -3017,6 +3017,9 @@ public class Main : ICustomClass
 
         string dpsReason;
         bool dpsAllowed = CanProceedWithDps(baseStatuses, owners, out dpsReason);
+        _lastDpsPolicyAllow = dpsAllowed;
+        _lastDpsReason = dpsReason;
+        _lastOverrideActive = overrideCount > 0;
         bool blockDps = !dpsAllowed;
 
         string callReason;
@@ -3032,6 +3035,7 @@ public class Main : ICustomClass
         }
 
         bool baseVerified = IsBasePresetVerified(baseStatuses);
+        _lastBaseVerified = baseVerified;
 
         if (_totemState == TotemPresetState.Verified)
         {
