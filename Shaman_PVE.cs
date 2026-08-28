@@ -3867,4 +3867,5 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
 		return false;
 	}
 }
-// API Cache Buster 12:40
+
+// Clean Cache Buster
