@@ -611,6 +611,9 @@ public class Main : ICustomClass
 	private static TotemPresetState _totemState = TotemPresetState.Dirty;
     private static TotemRestoreAction _lastRestoreAction = TotemRestoreAction.NONE;
     private static bool _lastDpsPolicyAllow = false;
+    private static long _fsmTickId = 0;
+    private static long _policyTickId = -1;
+    private static bool _policyValid = false;
     private static bool _lastBaseVerified = false;
     private static bool _lastOverrideActive = false;
     private static bool _lastSpecialDpsActive = false;
@@ -2253,7 +2256,7 @@ public class Main : ICustomClass
         
         if ((_lastDpsPolicyAllow && !dpsGateOpen && _totemState != TotemPresetState.Called && _lastRestoreAction != TotemRestoreAction.GLOBAL_CALL) || (!_lastDpsPolicyAllow && dpsGateOpen))
         {
-            FTLine("[DPS GATE INVARIANT VIOLATION] Mismatch between POLICY and GATE!");
+            FTLine("[DPS GATE INVARIANT VIOLATION] Mismatch! PolicyValid=" + _policyValid + " FSMTick=" + _fsmTickId + " PolicyTick=" + _policyTickId + " Policy=" + (_lastDpsPolicyAllow ? "ALLOW" : "BLOCK") + " Gate=" + (dpsGateOpen ? "OPEN" : "CLOSED") + " State=" + _totemState.ToString() + " Restore=" + _lastRestoreAction.ToString());
         }
 
         if (dpsGateOpen)
@@ -2465,17 +2468,17 @@ public class Main : ICustomClass
 
 	private bool IsBaseTotemReadyForDps()
 	{
-		if (_totemState == TotemPresetState.Verified) {
-			return true;
-		} else if (_totemState == TotemPresetState.ReadyToCall) {
-			return _lastDpsPolicyAllow;
-		} else if (_totemState == TotemPresetState.Called) {
-			if (_lastRestoreAction == TotemRestoreAction.PARTIAL_FALLBACK) {
-				return _lastDpsPolicyAllow;
-			}
-			return false;
-		}
-		return false;
+        if (_totemState == TotemPresetState.Verified) return true;
+        if (!_policyValid || _policyTickId != _fsmTickId) {
+            FTLine("[DPS GATE ERROR] STALE POLICY CACHE DETECTED! FSMTick=" + _fsmTickId + " PolicyTick=" + _policyTickId + " PolicyValid=" + _policyValid);
+            return false;
+        }
+        if (_totemState == TotemPresetState.ReadyToCall) return _lastDpsPolicyAllow;
+        if (_totemState == TotemPresetState.Called) {
+            if (_lastRestoreAction == TotemRestoreAction.PARTIAL_FALLBACK) return _lastDpsPolicyAllow;
+            return false;
+        }
+        return false;
 	}
 
 	private bool State_Universal_Reactions(ConfigCache c)
@@ -2970,6 +2973,8 @@ public class Main : ICustomClass
         if (eId != _lastSyncEarth || fId != _lastSyncFire || wId != _lastSyncWater || aId != _lastSyncAir)
         {
             _totemState = TotemPresetState.Dirty;
+            _lastDpsPolicyAllow = false;
+            _policyValid = false;
             _lastSyncEarth = eId; _lastSyncFire = fId; _lastSyncWater = wId; _lastSyncAir = aId;
             FTLine("[TOTEM MANAGER] PRESET CHANGED -> Dirty");
         }
@@ -3029,6 +3034,8 @@ public class Main : ICustomClass
         bool dpsAllowed = CanProceedWithDps(baseStatuses, owners, out dpsReason);
         _lastDpsPolicyAllow = dpsAllowed;
         _lastDpsReason = dpsReason;
+        _policyTickId = _fsmTickId;
+        _policyValid = true;
         _lastOverrideActive = overrideCount > 0;
         _lastSpecialDpsActive = (owners[0] == TotemSlotOwner.SPECIAL_DPS || owners[1] == TotemSlotOwner.SPECIAL_DPS || owners[2] == TotemSlotOwner.SPECIAL_DPS || owners[3] == TotemSlotOwner.SPECIAL_DPS);
         bool blockDps = !dpsAllowed;
