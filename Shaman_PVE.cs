@@ -3387,6 +3387,7 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
 	private void State_CoreRotation_Ele(ConfigCache c)
     {
         FT("[ELE FULL] State_CoreRotation_Ele");
+        if (ObjectManager.Me.IsCast) { FTLine("RETURN: IS CASTING"); return; }
         
         WoWUnit currentTarget = ObjectManager.Target;
         WoWUnit combatTarget = GetCombatTarget(30f);
