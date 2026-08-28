@@ -2238,18 +2238,7 @@ public class Main : ICustomClass
         FTLine("DPS_RESULT=" + (_lastDpsPolicyAllow ? "ALLOW" : "BLOCK"));
         FTLine("DPS_REASON=" + _lastDpsReason);
         
-        bool dpsGateOpen = false;
-        if (_totemState == TotemPresetState.Verified) {
-            dpsGateOpen = true;
-        } else if (_totemState == TotemPresetState.ReadyToCall) {
-            dpsGateOpen = _lastDpsPolicyAllow;
-        } else if (_totemState == TotemPresetState.Called) {
-            if (_lastRestoreAction == TotemRestoreAction.PARTIAL_FALLBACK) {
-                dpsGateOpen = _lastDpsPolicyAllow;
-            } else {
-                dpsGateOpen = false;
-            }
-        }
+        bool dpsGateOpen = IsBaseTotemReadyForDps();
         
         if (dpsGateOpen)
         {
@@ -2463,9 +2452,19 @@ public class Main : ICustomClass
 		}
 	}
 
-	private bool IsBaseTotemReadyForDps()
-	{
-		return _totemState == TotemPresetState.Verified;
+	private bool IsBaseTotemReadyForDps()
+	{
+		if (_totemState == TotemPresetState.Verified) {
+			return true;
+		} else if (_totemState == TotemPresetState.ReadyToCall) {
+			return _lastDpsPolicyAllow;
+		} else if (_totemState == TotemPresetState.Called) {
+			if (_lastRestoreAction == TotemRestoreAction.PARTIAL_FALLBACK) {
+				return _lastDpsPolicyAllow;
+			}
+			return false;
+		}
+		return false;
 	}
 
 	private bool State_Universal_Reactions(ConfigCache c)
