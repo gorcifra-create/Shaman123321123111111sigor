@@ -2151,6 +2151,95 @@ public class Main : ICustomClass
         return ObjectManager.Me.InCombatFlagOnly;
     }
     
+
+    private void HandleOffGcdBurst(ConfigCache c, bool isResto, bool isBurstPhase)
+    {
+        if (!isBurstPhase) return;
+        
+        bool useT1 = isResto ? c.Resto.UseTrinket1 : c.Ele.UseTrinket1;
+        bool useT2 = isResto ? c.Resto.UseTrinket2 : c.Ele.UseTrinket2;
+        bool useGloves = isResto ? c.Resto.UseEngGloves : c.Ele.UseEngGloves;
+        bool useRacial = isResto ? c.Resto.UseRacial : c.Ele.UseRacial;
+        bool useEM = !isResto && c.Ele.UseElementalMastery;
+        
+        if ((useT1 && !HasExpectedState("Burst_T1")) || 
+            (useT2 && !HasExpectedState("Burst_T2")) || 
+            (useGloves && !HasExpectedState("Burst_GL")))
+        {
+            string t1 = (useT1 && !HasExpectedState("Burst_T1")) ? "1" : "0";
+            string t2 = (useT2 && !HasExpectedState("Burst_T2")) ? "1" : "0";
+            string gl = (useGloves && !HasExpectedState("Burst_GL")) ? "1" : "0";
+            
+            string lua = @"
+                local ret = ''
+                if '" + t1 + @"' == '1' then
+                    local s, d = GetInventoryItemCooldown('player', 13)
+                    if s == 0 and d == 0 then UseInventoryItem(13); ret = ret .. 'T1,' end
+                end
+                if '" + t2 + @"' == '1' then
+                    local s, d = GetInventoryItemCooldown('player', 14)
+                    if s == 0 and d == 0 then UseInventoryItem(14); ret = ret .. 'T2,' end
+                end
+                if '" + gl + @"' == '1' then
+                    local s, d = GetInventoryItemCooldown('player', 10)
+                    if s == 0 and d == 0 then UseInventoryItem(10); ret = ret .. 'GL,' end
+                end
+                return ret
+            ";
+            
+            string result = Lua.LuaDoString<string>(lua, "");
+            if (!string.IsNullOrEmpty(result))
+            {
+                if (result.Contains("T1,"))
+                {
+                    AddExpectedState("Burst_T1", 2000);
+                    FTLine("[BURST CAST] FSMTick=" + _fsmTickId + " TYPE=Trinket1 REASON=OffGCD");
+                }
+                if (result.Contains("T2,"))
+                {
+                    AddExpectedState("Burst_T2", 2000);
+                    FTLine("[BURST CAST] FSMTick=" + _fsmTickId + " TYPE=Trinket2 REASON=OffGCD");
+                }
+                if (result.Contains("GL,"))
+                {
+                    AddExpectedState("Burst_GL", 2000);
+                    FTLine("[BURST CAST] FSMTick=" + _fsmTickId + " TYPE=Gloves REASON=OffGCD");
+                }
+            }
+        }
+        
+        if (useRacial && !HasExpectedState("Burst_Racial"))
+        {
+            uint bfId = ResolveSpell("blood_fury");
+            if (bfId != 0 && SpellManager.GetSpellCooldownTimeLeft(bfId) <= 0)
+            {
+                SpellManager.CastSpellByIdLUA(bfId);
+                AddExpectedState("Burst_Racial", 2000);
+                FTLine("[BURST CAST] FSMTick=" + _fsmTickId + " TYPE=blood_fury REASON=Racial");
+            }
+            else
+            {
+                uint bzId = ResolveSpell("berserking");
+                if (bzId != 0 && SpellManager.GetSpellCooldownTimeLeft(bzId) <= 0)
+                {
+                    SpellManager.CastSpellByIdLUA(bzId);
+                    AddExpectedState("Burst_Racial", 2000);
+                    FTLine("[BURST CAST] FSMTick=" + _fsmTickId + " TYPE=berserking REASON=Racial");
+                }
+            }
+        }
+        
+        if (useEM && !HasExpectedState("Burst_EM"))
+        {
+            uint emId = ResolveSpell("elemental_mastery");
+            if (emId != 0 && SpellManager.GetSpellCooldownTimeLeft(emId) <= 0)
+            {
+                SpellManager.CastSpellByIdLUA(emId);
+                AddExpectedState("Burst_EM", 2000);
+                FTLine("[BURST CAST] FSMTick=" + _fsmTickId + " TYPE=elemental_mastery REASON=Burst");
+            }
+        }
+    }
     private void FSM_Tick()
     {
         _fsmTickId++;
@@ -3655,61 +3744,9 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
         // OFF-GCD BURST COORDINATOR (ATOMIC MACRO)
         // ---------------------------------------------------------
         bool bloodlustActive = BuffManager.HaveBuff(((WoWObject)ObjectManager.Me).GetBaseAddress, ResolveSpell("bloodlust")) || BuffManager.HaveBuff(((WoWObject)ObjectManager.Me).GetBaseAddress, ResolveSpell("heroism"));
+
         bool burstPhase = IsBossLikeTarget(combatTarget) || bloodlustActive;
-
-        if (burstPhase)
-        {
-            if (c.Ele.UseTrinket1 && !HasExpectedState("Trinket1") && Lua.LuaDoString<bool>("local s, d, e = GetInventoryItemCooldown('player', 13); return s == 0;", ""))
-            {
-                Lua.LuaDoString("UseInventoryItem(13);", false);
-                AddExpectedState("Trinket1", 2000);
-                FTLine("[ELE BURST] Trinket 1 Used");
-            }
-
-            if (c.Ele.UseTrinket2 && !HasExpectedState("Trinket2") && Lua.LuaDoString<bool>("local s, d, e = GetInventoryItemCooldown('player', 14); return s == 0;", ""))
-            {
-                Lua.LuaDoString("UseInventoryItem(14);", false);
-                AddExpectedState("Trinket2", 2000);
-                FTLine("[ELE BURST] Trinket 2 Used");
-            }
-
-            if (c.Ele.UseEngGloves && !HasExpectedState("EngGloves") && Lua.LuaDoString<bool>("local s, d, e = GetInventoryItemCooldown('player', 10); return s == 0;", ""))
-            {
-                Lua.LuaDoString("UseInventoryItem(10);", false);
-                AddExpectedState("EngGloves", 2000);
-                FTLine("[ELE BURST] Gloves Used");
-            }
-
-            if (c.Ele.UseRacial && !HasExpectedState("Racial"))
-            {
-                uint bloodFuryId = ResolveSpell("blood_fury");
-                uint berserkingId = ResolveSpell("berserking");
-                
-                if (bloodFuryId != 0 && SpellManager.GetSpellCooldownTimeLeft(bloodFuryId) <= 0)
-                {
-                    SpellManager.CastSpellByIdLUA(bloodFuryId);
-                    AddExpectedState("Racial", 2000);
-                    FTLine("[ELE BURST] Blood Fury Used");
-                }
-                else if (berserkingId != 0 && SpellManager.GetSpellCooldownTimeLeft(berserkingId) <= 0)
-                {
-                    SpellManager.CastSpellByIdLUA(berserkingId);
-                    AddExpectedState("Racial", 2000);
-                    FTLine("[ELE BURST] Berserking Used");
-                }
-            }
-
-            if (c.Ele.UseElementalMastery && !HasExpectedState("EM"))
-            {
-                uint emId = ResolveSpell("elemental_mastery");
-                if (emId != 0 && SpellManager.GetSpellCooldownTimeLeft(emId) <= 0)
-                {
-                    SpellManager.CastSpellByIdLUA(emId);
-                    AddExpectedState("EM", 2000);
-                    FTLine("[ELE BURST] Elemental Mastery Used");
-                }
-            }
-        }
+        HandleOffGcdBurst(c, false, burstPhase);
         // Fire Elemental (Burst Layer)
         uint fireEleId = ResolveSpell("fire_elemental_totem");
         if (c.Ele.UseFireElemental && fireEleId != 0 && IsBossLikeTarget(combatTarget) && SpellManager.GetSpellCooldownTimeLeft(fireEleId) <= 0 && !HasExpectedState("FireEle"))
@@ -4128,49 +4165,11 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
 		{
 			return false;
 		}
-		if (num < 65f || flag2)
-		{
-			if (c.Resto.UseRacial && !HasExpectedState("Racial"))
-			{
-				uint num3 = ResolveSpell("blood_fury");
-				uint num4 = ResolveSpell("berserking");
-				if (num3 != 0 && SpellManager.GetSpellCooldownTimeLeft(num3) <= 0)
-				{
-					SpellManager.CastSpellByIdLUA(num3);
-					AddExpectedState("Racial", 120000);
-					Logging.Write("[RESTO OFFGCD] Blood Fury (" + num3 + ")");
-					return true;
-				}
-				if (num4 != 0 && SpellManager.GetSpellCooldownTimeLeft(num4) <= 0)
-				{
-					SpellManager.CastSpellByIdLUA(num4);
-					AddExpectedState("Racial", 180000);
-					Logging.Write("[RESTO OFFGCD] Berserking (" + num4 + ")");
-					return true;
-				}
-			}
-			if (c.Resto.UseTrinket1 && !HasExpectedState("T1") && Lua.LuaDoString<bool>("local _,d,_=GetInventoryItemCooldown('player',13); return d==0;", ""))
-			{
-				Lua.LuaDoString("UseInventoryItem(13);", false);
-				AddExpectedState("T1", 120000);
-				Logging.Write("[RESTO OFFGCD] Trinket 1");
-				return true;
-			}
-			if (c.Resto.UseTrinket2 && !HasExpectedState("T2") && Lua.LuaDoString<bool>("local _,d,_=GetInventoryItemCooldown('player',14); return d==0;", ""))
-			{
-				Lua.LuaDoString("UseInventoryItem(14);", false);
-				AddExpectedState("T2", 120000);
-				Logging.Write("[RESTO OFFGCD] Trinket 2");
-				return true;
-			}
-			if (c.Resto.UseEngGloves && !HasExpectedState("Gloves") && Lua.LuaDoString<bool>("local _,d,_=GetInventoryItemCooldown('player',10); return d==0;", ""))
-			{
-				Lua.LuaDoString("UseInventoryItem(10);", false);
-				AddExpectedState("Gloves", 60000);
-				Logging.Write("[RESTO OFFGCD] Eng Gloves");
-				return true;
-			}
-		}
+
+        if (num < 65f || flag2)
+        {
+            HandleOffGcdBurst(c, true, true);
+        }
 		if (_panicState != PanicState.None)
 		{
 			if ((uint)(Environment.TickCount - (int)_panicDeadline) < 2147483648u)
