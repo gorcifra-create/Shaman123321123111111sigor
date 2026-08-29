@@ -774,16 +774,25 @@ internal class Main : ICustomClass
         } catch {}
     }
 
-    private void FTLine(string message)
-    {
-        Logging.Write("[FULL TRACE]    " + message);
-        try {
-            if (_traceWriter != null)
-            {
-                _traceWriter.WriteLine("<div style='margin-left: 20px; color:#dcdcaa'>" + message + "</div>");
-            }
-        } catch {}
-    }
+    
+		private static System.Collections.Generic.Dictionary<string, uint> _logSpam = new System.Collections.Generic.Dictionary<string, uint>();
+		private void FTLine(string message)
+		{
+			uint now = (uint)Environment.TickCount;
+			if (_logSpam.ContainsKey(message) && (int)(_logSpam[message] - now) > 0)
+			{
+				return;
+			}
+			_logSpam[message] = now + 500;
+			
+			Logging.Write("[FULL TRACE]    " + message);
+			try {
+				if (_traceWriter != null)
+				{
+					_traceWriter.WriteLine("<div style='margin-left: 20px; color:#dcdcaa'>" + message + "</div>");
+				}
+			} catch {}
+		}
 
 	private void FTResult(string state, bool result)
 	{
