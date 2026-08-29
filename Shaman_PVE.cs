@@ -3535,33 +3535,52 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
 
         
         // ---------------------------------------------------------
-        // AOE Context & Legacy Mobs Count
-        // ---------------------------------------------------------
-        int legacyMobsCount = ObjectManager.GetUnitAttackPlayer().Count;
-        
-        // Chain Lightning exact target count calculation
-        int clSecondaryCount = 0;
-        if (c.Ele.UseChainLightning)
-        {
-            clSecondaryCount = ObjectManager.GetWoWUnitHostile().Count(u => 
-                u.IsAlive && u.IsAttackable && u.InCombatFlagOnly && 
-                u.Guid != combatTarget.Guid &&
-                ((WoWObject)u).Position.DistanceTo(((WoWObject)combatTarget).Position) <= 10f
-            );
-        }
-        int clTotalTargets = 1 + clSecondaryCount;
-        int clAoeThreshold = 3; // From legacy mobsCount >= 3
+        // =========================================================
+        // CANONICAL AOE ENGINE (Task #11)
+        // =========================================================
+        Vector3 playerPos = ((WoWObject)ObjectManager.Me).Position;
+        Vector3 targetPos = combatTarget != null ? ((WoWObject)combatTarget).Position : playerPos;
+        bool hasTarget = combatTarget != null;
 
-        FTLine("[AOE DECISION] TARGET=" + combatTarget.Name
-            + " LegacyMobs=" + legacyMobsCount
-            + " CL_TotalTargets=" + clTotalTargets
-            + " THRESHOLD=" + clAoeThreshold
-            + " CL_AoeOnly=" + c.Ele.ChainLightningAoe);
+        int enemiesAroundPlayer = 0;
+        int enemiesAroundTarget = 0;
+
+        // Single deterministic pass over valid hostile units
+        foreach (WoWUnit u in ObjectManager.GetWoWUnitHostile())
+        {
+            if (u.IsAlive && u.IsAttackable && u.InCombatFlagOnly)
+            {
+                float distToPlayer = ((WoWObject)u).Position.DistanceTo(playerPos);
+                if (distToPlayer <= 10f)
+                {
+                    enemiesAroundPlayer++;
+                }
+
+                if (hasTarget && u.Guid != combatTarget.Guid)
+                {
+                    float distToTarget = ((WoWObject)u).Position.DistanceTo(targetPos);
+                    if (distToTarget <= 10f)
+                    {
+                        enemiesAroundTarget++;
+                    }
+                }
+            }
+        }
+
+        int fnTotalTargets = enemiesAroundPlayer; 
+        int tsTotalTargets = enemiesAroundPlayer; 
+        int clTotalTargets = hasTarget ? (1 + enemiesAroundTarget) : 0;
+        int aoeThreshold = 3; // Baseline threshold for AOE logic
+
+        FTLine("[AOE ENGINE] PlayerEnemies(10y)=" + enemiesAroundPlayer
+            + " TargetEnemies(10y)=" + enemiesAroundTarget
+            + " CL_Total=" + clTotalTargets
+            + " THRESHOLD=" + aoeThreshold);
 
         // ---------------------------------------------------------
         // Priority 3: Fire Nova (AOE)
         // ---------------------------------------------------------
-        if (legacyMobsCount >= 3)
+        if (fnTotalTargets >= aoeThreshold)
         {
             uint fnId = ResolveSpell("fire_nova");
             if (fnId > 0 && SpellManager.GetSpellCooldownTimeLeft(fnId) <= 0)
@@ -3572,22 +3591,20 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
                 return;
             }
         }
-
-        // ---------------------------------------------------------
         // Priority 4: Chain Lightning (AOE or ST)
         // ---------------------------------------------------------
         uint clId = ResolveSpell("chain_lightning");
         bool clKnown = clId > 0;
         float clCd = clKnown ? SpellManager.GetSpellCooldownTimeLeft(clId) : -1f;
         
-        bool clIsAoeEligible = (clTotalTargets >= clAoeThreshold);
+        bool clIsAoeEligible = (clTotalTargets >= aoeThreshold);
         bool clIsStEligible = (!c.Ele.ChainLightningAoe && ObjectManager.Me.ManaPercentage > 60);
         
         bool clEligible = c.Ele.UseChainLightning && clKnown && clCd <= 0 && !moving && (clIsAoeEligible || clIsStEligible);
         bool isClBlocked = HasExpectedState("ChainLightning_Attempt");
 
         FTLine("[CHAIN LIGHTNING] Target=" + combatTarget.Name
-            + " CL_Targets=" + clTotalTargets + " Threshold=" + clAoeThreshold
+            + " CL_Targets=" + clTotalTargets + " Threshold=" + aoeThreshold
             + " CD=" + clCd.ToString("0") + "ms" + " Moving=" + moving
             + " Mana=" + ObjectManager.Me.ManaPercentage + "%"
             + " Eligible=" + clEligible + " Blocked=" + isClBlocked);
@@ -3614,7 +3631,7 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
         // ---------------------------------------------------------
         // Priority 5: Thunderstorm (AOE)
         // ---------------------------------------------------------
-        if (legacyMobsCount >= 3)
+        if (tsTotalTargets >= aoeThreshold)
         {
             uint tsId = ResolveSpell("thunderstorm");
             if (c.Ele.UseThunderstorm && tsId > 0 && SpellManager.GetSpellCooldownTimeLeft(tsId) <= 0)
