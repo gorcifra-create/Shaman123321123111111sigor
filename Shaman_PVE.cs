@@ -3534,9 +3534,34 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
         }
 
         
-        // AoE Decision
-        int mobsCount = ObjectManager.GetUnitAttackPlayer().Count;
-        if (mobsCount >= 3)
+        // ---------------------------------------------------------
+        // AOE Context & Legacy Mobs Count
+        // ---------------------------------------------------------
+        int legacyMobsCount = ObjectManager.GetUnitAttackPlayer().Count;
+        
+        // Chain Lightning exact target count calculation
+        int clSecondaryCount = 0;
+        if (c.Ele.UseChainLightning)
+        {
+            clSecondaryCount = ObjectManager.GetWoWUnitHostile().Count(u => 
+                u.IsAlive && u.IsAttackable && u.InCombatFlagOnly && 
+                u.Guid != combatTarget.Guid &&
+                ((WoWObject)u).Position.DistanceTo(((WoWObject)combatTarget).Position) <= 10f
+            );
+        }
+        int clTotalTargets = 1 + clSecondaryCount;
+        int clAoeThreshold = 3; // From legacy mobsCount >= 3
+
+        FTLine("[AOE DECISION] TARGET=" + combatTarget.Name
+            + " LegacyMobs=" + legacyMobsCount
+            + " CL_TotalTargets=" + clTotalTargets
+            + " THRESHOLD=" + clAoeThreshold
+            + " CL_AoeOnly=" + c.Ele.ChainLightningAoe);
+
+        // ---------------------------------------------------------
+        // Priority 3: Fire Nova (AOE)
+        // ---------------------------------------------------------
+        if (legacyMobsCount >= 3)
         {
             uint fnId = ResolveSpell("fire_nova");
             if (fnId > 0 && SpellManager.GetSpellCooldownTimeLeft(fnId) <= 0)
@@ -3546,16 +3571,51 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
                 FTLine("RETURN TRUE: ELE.FireNova");
                 return;
             }
-            
-            uint clId = ResolveSpell("chain_lightning");
-            if (c.Ele.UseChainLightning && clId > 0 && SpellManager.GetSpellCooldownTimeLeft(clId) <= 0 && !moving)
-            {
-                FTLine("ACTION CAST Chain Lightning (AoE)");
-                SpellManager.CastSpellByIdLUA(clId);
-                FTLine("RETURN TRUE: ELE.ChainLightning");
-                return;
-            }
-            
+        }
+
+        // ---------------------------------------------------------
+        // Priority 4: Chain Lightning (AOE or ST)
+        // ---------------------------------------------------------
+        uint clId = ResolveSpell("chain_lightning");
+        bool clKnown = clId > 0;
+        float clCd = clKnown ? SpellManager.GetSpellCooldownTimeLeft(clId) : -1f;
+        
+        bool clIsAoeEligible = (clTotalTargets >= clAoeThreshold);
+        bool clIsStEligible = (!c.Ele.ChainLightningAoe && ObjectManager.Me.ManaPercentage > 60);
+        
+        bool clEligible = c.Ele.UseChainLightning && clKnown && clCd <= 0 && !moving && (clIsAoeEligible || clIsStEligible);
+        bool isClBlocked = HasExpectedState("ChainLightning_Attempt");
+
+        FTLine("[CHAIN LIGHTNING] Target=" + combatTarget.Name
+            + " CL_Targets=" + clTotalTargets + " Threshold=" + clAoeThreshold
+            + " CD=" + clCd.ToString("0") + "ms" + " Moving=" + moving
+            + " Mana=" + ObjectManager.Me.ManaPercentage + "%"
+            + " Eligible=" + clEligible + " Blocked=" + isClBlocked);
+
+        if (clEligible && !isClBlocked)
+        {
+            FTLine("[CHAIN LIGHTNING CAST] Target=" + combatTarget.Name 
+                + " ENEMY_COUNT=" + clTotalTargets 
+                + " REASON=" + (clIsAoeEligible ? "AOE" : "ST"));
+            SpellManager.CastSpellByIdLUA(clId);
+            AddExpectedState("ChainLightning_Attempt", 2500); // 2s cast base + latency
+            FTLine("RETURN TRUE: ELE.ChainLightning");
+            return;
+        }
+        else if (clKnown && clCd <= 0 && !clEligible && !isClBlocked)
+        {
+            string clReason = !c.Ele.UseChainLightning ? "Disabled" : 
+                              moving ? "Moving" : 
+                              (c.Ele.ChainLightningAoe && !clIsAoeEligible) ? "AoeCountNotMet" : 
+                              (!clIsAoeEligible && ObjectManager.Me.ManaPercentage <= 60) ? "LowManaForST" : "Unknown";
+            FTLine("[CHAIN LIGHTNING BLOCK] Target=" + combatTarget.Name + " REASON=" + clReason);
+        }
+
+        // ---------------------------------------------------------
+        // Priority 5: Thunderstorm (AOE)
+        // ---------------------------------------------------------
+        if (legacyMobsCount >= 3)
+        {
             uint tsId = ResolveSpell("thunderstorm");
             if (c.Ele.UseThunderstorm && tsId > 0 && SpellManager.GetSpellCooldownTimeLeft(tsId) <= 0)
             {
@@ -3565,19 +3625,10 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
                 return;
             }
         }
-        else
-        {
-            uint clId = ResolveSpell("chain_lightning");
-            if (c.Ele.UseChainLightning && !c.Ele.ChainLightningAoe && clId > 0 && SpellManager.GetSpellCooldownTimeLeft(clId) <= 0 && !moving && ObjectManager.Me.ManaPercentage > 60)
-            {
-                FTLine("ACTION CAST Chain Lightning (ST)");
-                SpellManager.CastSpellByIdLUA(clId);
-                FTLine("RETURN TRUE: ELE.ChainLightning");
-                return;
-            }
-        }
-        
-        // Lightning Bolt (Filler)
+
+        // ---------------------------------------------------------
+        // Priority 6: Lightning Bolt (Filler)
+        // ---------------------------------------------------------
         uint lbId = ResolveSpell("lightning_bolt");
         bool lbKnown = lbId > 0;
         bool lbEligible = c.Ele.UseLightningBolt && lbKnown && !moving;
