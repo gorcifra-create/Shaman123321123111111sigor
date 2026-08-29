@@ -2747,7 +2747,7 @@ public class Main : ICustomClass
                 
                 bool isPurgeable = IsTargetPurgeable(out auraName, out auraType);
                 
-                FTLine("[PURGE] CANDIDATE=" + combatTarget.Name + " AURA=" + (isPurgeable ? auraName : "None") + " AURA_TYPE=" + (isPurgeable ? auraType : "None") + " DISPELLABLE=" + isPurgeable + " DISTANCE=" + combatTarget.GetDistance.ToString("0.0") + " LOS=True");
+                if (isPurgeable) FTLine("[PURGE] CANDIDATE=" + combatTarget.Name + " AURA=" + auraName + " AURA_TYPE=" + auraType + " DISPELLABLE=" + isPurgeable + " DISTANCE=" + combatTarget.GetDistance.ToString("0.0") + " LOS=True");
 
                 if (isPurgeable)
                 {
@@ -2759,7 +2759,7 @@ public class Main : ICustomClass
                 }
                 else
                 {
-                    FTLine("[PURGE BLOCK] FSMTick=" + _fsmTickId + " REASON=Not Dispellable or Finished");
+                    // Silent block for no aura to prevent log spam
                 }
             }
         }
