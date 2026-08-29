@@ -3415,6 +3415,9 @@ public class Main : ICustomClass
             {
                 FTLine("[UNKNOWN ENCHANT] Tooltip scan failed to match any shaman enchant.");
                 AddExpectedState("UnknownEnchantTrace", 60000);
+            }
+        }
+    }
 private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
 	{
 		FT("[BUFFS FULL] State_BuffsAndTotems");
