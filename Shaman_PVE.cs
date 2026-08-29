@@ -3472,7 +3472,8 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
                         FTLine("[WEAPON ENCHANT] FSMTick=" + _fsmTickId + " HAND=Main CURRENT_ENCHANT=" + currentEnchant + " DESIRED_ENCHANT=" + desiredWeaponEnchant + " REMAINING=" + remainingMs + "ms REASON=" + (isMissing ? "Missing" : (isWrong ? "Wrong" : "Expiring")));
                         FTLine("[WEAPON ENCHANT CAST] FSMTick=" + _fsmTickId + " HAND=Main DESIRED=" + desiredWeaponEnchant + " REASON=Refresh");
                         
-                        SpellManager.CastSpellByIdLUA(wepSpellId);
+                        Lua.LuaDoString("CastSpellByID(" + wepSpellId + "); if SpellIsTargeting() then UseInventoryItem(16); end", false);
+                        Logging.Write("[REACT] Weapon Enchant: " + desiredWeaponEnchant);
                         AddExpectedState("Weapon", 3000); // Prevent double cast same tick
                         FTLine("RETURN TRUE: Buffs.Weapon");
                         return true;
