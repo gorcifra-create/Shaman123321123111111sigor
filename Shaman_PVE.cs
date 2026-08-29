@@ -15,14 +15,14 @@ using wManager.Wow.ObjectManager;
 [assembly: RuntimeCompatibility(WrapNonExceptionThrows = true)]
 [assembly: CompilationRelaxations(8)]
 [assembly: AssemblyVersion("0.0.0.0")]
-public enum TotemRestoreAction
+internal enum TotemRestoreAction
 {
     NONE,
     GLOBAL_CALL,
     PARTIAL_FALLBACK
 }
 
-public class Main : ICustomClass
+internal class Main : ICustomClass
 {
 	private struct ShamanCapabilities
 	{
@@ -92,7 +92,7 @@ public class Main : ICustomClass
             
             uint[] trinkets = new uint[] { 59077, 64713, 60492, 60494, 71570, 71572, 72416, 75466, 65006, 65011, 64712, 64713, 59626, 67669, 67671 };
             
-            List<wManager.Wow.Class.Aura> auras = wManager.Wow.Helpers.BuffManager.GetAuras(((wManager.Wow.ObjectManager.WoWObject)wManager.Wow.ObjectManager.ObjectManager.Me).GetBaseAddress);
+            System.Collections.Generic.IEnumerable<wManager.Wow.Class.Aura> auras = wManager.Wow.Helpers.BuffManager.GetAuras(((wManager.Wow.ObjectManager.WoWObject)wManager.Wow.ObjectManager.ObjectManager.Me).GetBaseAddress);
             foreach (wManager.Wow.Class.Aura a in auras)
             {
                 uint id = a.SpellId;
