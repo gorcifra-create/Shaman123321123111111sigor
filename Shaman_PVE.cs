@@ -2584,6 +2584,12 @@ internal class Main : ICustomClass
             FTResult("State_BuffsAndTotems", buffs);
             FTStateEnd("State_BuffsAndTotems");
             if (buffs) { FTLine("FSM_TICK END"); return; }
+			
+			FTStateStart("Combat.State_Consumables");
+			bool cons = State_Consumables(c, isResto);
+			FTResult("Combat.State_Consumables", cons);
+			FTStateEnd("Combat.State_Consumables");
+			if (cons) { FTLine("FSM_TICK END"); return; }
 
             if (isResto)
             {
@@ -2910,7 +2916,59 @@ internal class Main : ICustomClass
     }
 
 
-    private bool State_Universal_Reactions(ConfigCache c)
+    
+	private bool State_Consumables(ConfigCache c, bool isResto)
+	{
+		WoWUnit combatTarget = GetCombatTarget();
+		bool inMovement = ObjectManager.Me.GetMove;
+		
+		// 1. Combat Potions (Off-GCD, no yield)
+		// Trigger: Bloodlust/Heroism or Fire Elemental Totem
+		bool hasHeroism = BuffManager.HaveBuff(((WoWObject)ObjectManager.Me).GetBaseAddress, 32182u) || BuffManager.HaveBuff(((WoWObject)ObjectManager.Me).GetBaseAddress, 2825u);
+		bool hasFireEle = _lastSpecialDpsActive; // from Totem FSM (Special DPS active implies Fire Elemental)
+		
+		if ((hasHeroism || hasFireEle) && !HasExpectedState("CombatPot") && !HasExpectedState("PrePot"))
+		{
+			if (c.Common.UsePotionSpeedCombat && ItemsManager.HasItemById(40211u) && Lua.LuaDoString<bool>("local _,d = GetItemCooldown(40211); return d == 0;", ""))
+			{
+				ItemsManager.UseItem(40211u);
+				AddExpectedState("CombatPot", 60000);
+				FTLine("[COMBAT POT] FSMTick=" + Environment.TickCount + " ITEM=PotionOfSpeed COOLDOWN=0 ACTION=Use REASON=Burst");
+			}
+			else if (c.Common.UsePotionWildMagicCombat && ItemsManager.HasItemById(40212u) && Lua.LuaDoString<bool>("local _,d = GetItemCooldown(40212); return d == 0;", ""))
+			{
+				ItemsManager.UseItem(40212u);
+				AddExpectedState("CombatPot", 60000);
+				FTLine("[COMBAT POT] FSMTick=" + Environment.TickCount + " ITEM=PotionOfWildMagic COOLDOWN=0 ACTION=Use REASON=Burst");
+			}
+		}
+		
+		// 2. Saronite Bomb (GCD, yields)
+		if (!inMovement && c.Common.UseSaroniteBomb && combatTarget != null && combatTarget.IsValid && combatTarget.IsAttackable && combatTarget.GetDistance <= 30f)
+		{
+			if (ItemsManager.HasItemById(41119u) && Lua.LuaDoString<bool>("local _,d = GetItemCooldown(41119); return d == 0;", "") && !HasExpectedState("SaroniteBomb"))
+			{
+				// Target Sync for Bomb
+				if (((WoWUnit)ObjectManager.Me).Target != ((WoWObject)combatTarget).Guid)
+				{
+					FTLine("[TARGET SWITCH] FROM=" + (((WoWUnit)ObjectManager.Me).Target) + " TO=" + combatTarget.Name + " REASON=Saronite Bomb Target Sync");
+					SafeSetTarget(combatTarget);
+					return true; // Yield for target sync
+				}
+				
+				FTLine("[BOMB] FSMTick=" + Environment.TickCount + " ITEM=SaroniteBomb TARGET=" + combatTarget.Name + " DISTANCE=" + combatTarget.GetDistance.ToString("0.0") + " ACTION=Use REASON=DPS");
+				ItemsManager.UseItem(41119u);
+				// Await target reticle and click
+				Lua.LuaDoString("if SpellIsTargeting() then SpellTargetUnit('target'); end", false);
+				AddExpectedState("SaroniteBomb", 2000);
+				return true; // Yields because bomb triggers GCD!
+			}
+		}
+		
+		return false;
+	}
+	
+	private bool State_Universal_Reactions(ConfigCache c)
     {
         WoWUnit combatTarget = GetCombatTarget();
 
@@ -3022,20 +3080,20 @@ internal class Main : ICustomClass
 			if (c.Common.UseFelHealthstone && ((WoWUnit)ObjectManager.Me).HealthPercent <= (double)c.Common.HpRegenPct && !HasExpectedState("Healthstone") && ItemsManager.HasItemById(36892u) && Lua.LuaDoString<bool>("local s,d = GetItemCooldown(36892); return d == 0;", ""))
 			{
 				ItemsManager.UseItem(36892u);
-				AddExpectedState("Healthstone", 2000);
-				return true;
+				AddExpectedState("Healthstone", 2000);
+				FTLine("[HEALTHSTONE] FSMTick=" + Environment.TickCount + " HP=" + ((WoWUnit)ObjectManager.Me).HealthPercent + " THRESHOLD=" + c.Common.HpRegenPct + " COUNT=" + ItemsManager.GetItemCountById(36892u) + " COOLDOWN=2000 ACTION=Use REASON=Survival");
 			}
 			if (c.Common.UseRunicHealingPotion && ((WoWUnit)ObjectManager.Me).HealthPercent <= (double)c.Common.HpRegenPct && !HasExpectedState("HealthPotion") && ItemsManager.HasItemById(33447u) && Lua.LuaDoString<bool>("local s,d = GetItemCooldown(33447); return d == 0;", ""))
 			{
 				ItemsManager.UseItem(33447u);
-				AddExpectedState("HealthPotion", 2000);
-				return true;
+				AddExpectedState("HealthPotion", 2000);
+				FTLine("[HEALTH_POTION] FSMTick=" + Environment.TickCount + " HP=" + ((WoWUnit)ObjectManager.Me).HealthPercent + " THRESHOLD=" + c.Common.HpRegenPct + " ACTION=Use REASON=Survival");
 			}
 			if (c.Common.UseRunicManaPotion && ((WoWUnit)ObjectManager.Me).ManaPercentage <= c.Common.MpRegenPct && !HasExpectedState("ManaPotion") && ItemsManager.HasItemById(33448u) && Lua.LuaDoString<bool>("local s,d = GetItemCooldown(33448); return d == 0;", ""))
 			{
 				ItemsManager.UseItem(33448u);
-				AddExpectedState("ManaPotion", 2000);
-				return true;
+				AddExpectedState("ManaPotion", 2000);
+				FTLine("[MANA_POTION] FSMTick=" + Environment.TickCount + " MANA=" + ((WoWUnit)ObjectManager.Me).ManaPercentage + " THRESHOLD=" + c.Common.MpRegenPct + " ACTION=Use REASON=Survival");
 			}
 		}
 
@@ -3143,6 +3201,24 @@ internal class Main : ICustomClass
 				
 				if (currentTarget != null && currentTarget.IsValid && currentTarget.IsAlive && currentTarget.IsAttackable)
 				{
+					
+					// PRE-POT LOGIC (Off-GCD, no yield)
+					if (pullRemaining <= 2.5f && !ObjectManager.Me.IsCast && !HasExpectedState("PrePot"))
+					{
+						if (c.Common.UsePotionSpeedPrepot && ItemsManager.HasItemById(40211u) && Lua.LuaDoString<bool>("local _,d = GetItemCooldown(40211); return d == 0;", ""))
+						{
+							ItemsManager.UseItem(40211u);
+							AddExpectedState("PrePot", 60000); // Prevent duplicate for 60s
+							FTLine("[PRE-POT] FSMTick=" + Environment.TickCount + " ITEM=PotionOfSpeed PULL_REMAINING=" + pullRemaining.ToString("0.0") + " ACTION=Use REASON=PrePull");
+						}
+						else if (c.Common.UsePotionWildMagicPrepot && ItemsManager.HasItemById(40212u) && Lua.LuaDoString<bool>("local _,d = GetItemCooldown(40212); return d == 0;", ""))
+						{
+							ItemsManager.UseItem(40212u);
+							AddExpectedState("PrePot", 60000);
+							FTLine("[PRE-POT] FSMTick=" + Environment.TickCount + " ITEM=PotionOfWildMagic PULL_REMAINING=" + pullRemaining.ToString("0.0") + " ACTION=Use REASON=PrePull");
+						}
+					}
+					
 					// Elemental Precast
 					if (!isResto)
 					{
@@ -3911,24 +3987,7 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
             }
         }
 
-		if (inCombatFlagOnly && !inMovement)
-		{
-			FTLine("CHECK Saronite Bomb");
-			if (c.Common.UseSaroniteBomb && ItemsManager.HasItemById(41119u) && Lua.LuaDoString<bool>("local _,d = GetItemCooldown(41119); return d == 0;", "") && !HasExpectedState("SaroniteBomb"))
-			{
-				WoWUnit target = ObjectManager.Target;
-				if (target != null && ((WoWObject)target).IsValid && target.IsAttackable && ((WoWObject)target).GetDistance <= 30f)
-				{
-					FTLine("ACTION USE Saronite Bomb");
-					ItemsManager.UseItem(41119u);
-					ClickOnTerrain.Pulse(((WoWObject)target).Position);
-					AddExpectedState("SaroniteBomb", 2000);
-					FTLine("[RETURN TRACE] METHOD=State_BuffsAndTotems RETURN=True REASON=Bomb ACTION=Cast NEXT_EXPECTED=FSM_End");
-			FTLine("[YIELD] METHOD=State_BuffsAndTotems REASON=Cast");
-					return true;
-				}
-			}
-		}
+		
 		FTLine("RESULT = FALSE -> CONTINUE");
 		return false;
 	}
