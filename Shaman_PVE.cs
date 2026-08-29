@@ -3079,19 +3079,22 @@ internal class Main : ICustomClass
 		{
 			if (c.Common.UseFelHealthstone && ((WoWUnit)ObjectManager.Me).HealthPercent <= (double)c.Common.HpRegenPct && !HasExpectedState("Healthstone") && ItemsManager.HasItemById(36892u) && Lua.LuaDoString<bool>("local s,d = GetItemCooldown(36892); return d == 0;", ""))
 			{
-				ItemsManager.UseItem(36892u);
+				FTLine("[EMERGENCY] FSMTick=" + Environment.TickCount + " TRIGGER=LowHP HP=" + ((WoWUnit)ObjectManager.Me).HealthPercent + " THRESHOLD=LowHP_cfg ACTION=Use REASON=Survival");
+				ItemsManager.UseItem(36892u);
 				AddExpectedState("Healthstone", 2000);
 				FTLine("[HEALTHSTONE] FSMTick=" + Environment.TickCount + " HP=" + ((WoWUnit)ObjectManager.Me).HealthPercent + " THRESHOLD=" + c.Common.HpRegenPct + " COUNT=" + ItemsManager.GetItemCountById(36892u) + " COOLDOWN=2000 ACTION=Use REASON=Survival");
 			}
 			if (c.Common.UseRunicHealingPotion && ((WoWUnit)ObjectManager.Me).HealthPercent <= (double)c.Common.HpRegenPct && !HasExpectedState("HealthPotion") && ItemsManager.HasItemById(33447u) && Lua.LuaDoString<bool>("local s,d = GetItemCooldown(33447); return d == 0;", ""))
 			{
-				ItemsManager.UseItem(33447u);
+				FTLine("[EMERGENCY] FSMTick=" + Environment.TickCount + " TRIGGER=LowHP HP=" + ((WoWUnit)ObjectManager.Me).HealthPercent + " THRESHOLD=LowHP_cfg ACTION=Use REASON=Survival");
+				ItemsManager.UseItem(33447u);
 				AddExpectedState("HealthPotion", 2000);
 				FTLine("[HEALTH_POTION] FSMTick=" + Environment.TickCount + " HP=" + ((WoWUnit)ObjectManager.Me).HealthPercent + " THRESHOLD=" + c.Common.HpRegenPct + " ACTION=Use REASON=Survival");
 			}
 			if (c.Common.UseRunicManaPotion && ((WoWUnit)ObjectManager.Me).ManaPercentage <= c.Common.MpRegenPct && !HasExpectedState("ManaPotion") && ItemsManager.HasItemById(33448u) && Lua.LuaDoString<bool>("local s,d = GetItemCooldown(33448); return d == 0;", ""))
 			{
-				ItemsManager.UseItem(33448u);
+				FTLine("[EMERGENCY] FSMTick=" + Environment.TickCount + " TRIGGER=LowMana Mana=" + ((WoWUnit)ObjectManager.Me).ManaPercentage + " THRESHOLD=LowMana_cfg ACTION=Use REASON=Survival");
+				ItemsManager.UseItem(33448u);
 				AddExpectedState("ManaPotion", 2000);
 				FTLine("[MANA_POTION] FSMTick=" + Environment.TickCount + " MANA=" + ((WoWUnit)ObjectManager.Me).ManaPercentage + " THRESHOLD=" + c.Common.MpRegenPct + " ACTION=Use REASON=Survival");
 			}
@@ -3172,13 +3175,14 @@ internal class Main : ICustomClass
 					continue;
 				}
 				
-				// Defensive stops
-				if ((text2.Contains("meteor") || text2.Contains("defile") || text2.Contains("blistering")) && result <= 2f)
+				// Defensive stops — DBM danger (meteor / defile / blistering)
+				if ((text2.Contains("meteor") || text2.Contains("defile") || text2.Contains("blistering")) && result <= 2.5f)
 				{
+					FTLine("[EMERGENCY] FSMTick=" + Environment.TickCount + " TRIGGER=DBM_Danger MECHANIC=" + text2 + " TIMER=" + result.ToString("0.0") + " ACTION=" + (ObjectManager.Me.IsCast ? "StopCast+Block" : "Block") + " REASON=DangerousAbility");
 					if (ObjectManager.Me.IsCast)
 					{
 						Lua.LuaDoString("SpellStopCasting();", false);
-						Logging.Write("[God-Tier] DANGER DETECTED: StopCasting!");
+						Logging.Write("[God-Tier] DANGER: " + text2 + " in " + result.ToString("0.0") + "s — StopCasting!");
 					}
 					precastActionTaken = true;
 				}
@@ -4525,26 +4529,42 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
 		}
 		if (c.Resto.EarthShieldRefresh && tank != null && !HasExpectedState("EarthShield"))
 		{
-			bool flag = true;
-			Aura val2 = BuffManager.GetAuras(((WoWObject)tank).GetBaseAddress).FirstOrDefault((Aura a) => a.SpellId == 49284);
-			if (val2 != null && val2.TimeLeft > c.Resto.EarthShieldRefreshThresholdMs)
+			bool shouldRefresh = false;
+			int esCharges = 0;
+			int esTimeLeft = 0;
+			uint esSpellId = ResolveSpell("earth_shield");
+			if (esSpellId != 0 && SpellManager.GetSpellCooldownTimeLeft(esSpellId) <= 0)
 			{
-				flag = false;
-			}
-			if (flag && ResolveSpell("earth_shield") != 0 && SpellManager.GetSpellCooldownTimeLeft(ResolveSpell("earth_shield")) <= 0)
-			{
-				if (((WoWUnit)ObjectManager.Me).Target != ((WoWObject)tank).Guid)
+				Aura esAura = BuffManager.GetAuras(((WoWObject)tank).GetBaseAddress)
+					.FirstOrDefault((Aura a) => a.SpellId == esSpellId || a.SpellId == 49284 || a.SpellId == 32594 || a.SpellId == 32593 || a.SpellId == 16298 || a.SpellId == 974);
+				if (esAura == null)
 				{
-					SafeSetTarget(tank);
-            FTLine("[RETURN TRACE] METHOD=State_CoreRotation_Resto RETURN=True REASON=TargetSync ACTION=Handled NEXT_EXPECTED=FSM_End");
-            FTLine("[YIELD] METHOD=State_CoreRotation_Resto REASON=TargetSync");
+					shouldRefresh = true;
+				}
+				else
+				{
+					esCharges = esAura.Stack;
+					esTimeLeft = esAura.TimeLeft;
+					if (esTimeLeft <= c.Resto.EarthShieldRefreshThresholdMs || esCharges <= 1)
+						shouldRefresh = true;
+				}
+				if (shouldRefresh)
+				{
+					if (((WoWUnit)ObjectManager.Me).Target != ((WoWObject)tank).Guid)
+					{
+						FTLine("[EARTH SHIELD] FSMTick=" + Environment.TickCount + " TARGET=" + ((WoWObject)tank).Name + " CHARGES=" + esCharges + " REMAINING=" + esTimeLeft + " ACTION=TargetSync REASON=Refresh");
+						SafeSetTarget(tank);
+						FTLine("[RETURN TRACE] METHOD=State_CoreRotation_Resto RETURN=True REASON=TargetSync ACTION=Handled NEXT_EXPECTED=FSM_End");
+						FTLine("[YIELD] METHOD=State_CoreRotation_Resto REASON=TargetSync");
+						return true;
+					}
+					FTLine("[EARTH SHIELD] FSMTick=" + Environment.TickCount + " TARGET=" + ((WoWObject)tank).Name + " CHARGES=" + esCharges + " REMAINING=" + esTimeLeft + " ACTION=Cast REASON=Refresh");
+					FastCastById(esSpellId);
+					AddExpectedState("EarthShield", 2000);
+					FTLine("[RETURN TRACE] METHOD=State_CoreRotation_Resto RETURN=True REASON=EarthShield ACTION=Handled NEXT_EXPECTED=FSM_End");
+					FTLine("[YIELD] METHOD=State_CoreRotation_Resto REASON=EarthShield");
 					return true;
 				}
-				FastCastById(ResolveSpell("earth_shield"));
-				AddExpectedState("EarthShield", 2000);
-            FTLine("[RETURN TRACE] METHOD=State_CoreRotation_Resto RETURN=True REASON=EarthShield ACTION=Handled NEXT_EXPECTED=FSM_End");
-            FTLine("[YIELD] METHOD=State_CoreRotation_Resto REASON=EarthShield");
-				return true;
 			}
 		}
 		bool flag2 = c.Resto.ValithriaEnable && list.Any((WoWUnit x) => ((WoWObject)x).Entry == 36789 && x.HealthPercent < 100.0);
