@@ -61,7 +61,7 @@ internal class Main : ICustomClass
 
 
 		
-		private uint _nextCapsUpdate = 0;
+		private uint _nextCapsUpdate;
 		public void Update(Main m)
 		{
 			if (Environment.TickCount < _nextCapsUpdate) return;
