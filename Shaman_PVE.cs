@@ -3009,7 +3009,7 @@ public class Main : ICustomClass
         {
             if (!inCombat)
             {
-                Lua.LuaDoString("if not InCombatLockdown() then SetMultiCastSpell(133, " + ((eId != 0) ? eId.ToString() : "0") + "); SetMultiCastSpell(134, " + ((fId != 0) ? fId.ToString() : "0") + "); SetMultiCastSpell(135, " + ((wId != 0) ? wId.ToString() : "0") + "); SetMultiCastSpell(136, " + ((aId != 0) ? aId.ToString() : "0") + "); end", false);
+                Lua.LuaDoString("if not InCombatLockdown() then SetMultiCastSpell(133, " + ((fId != 0) ? fId.ToString() : "0") + "); SetMultiCastSpell(134, " + ((eId != 0) ? eId.ToString() : "0") + "); SetMultiCastSpell(135, " + ((wId != 0) ? wId.ToString() : "0") + "); SetMultiCastSpell(136, " + ((aId != 0) ? aId.ToString() : "0") + "); if MultiCastActionBarFrame then MultiCastActionBarFrame:Update() end; end", false);
                 _totemState = TotemPresetState.Synced;
                 FTLine("[TOTEM MANAGER] OOC Action Bar Updated -> Synced");
             }
