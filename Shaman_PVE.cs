@@ -2950,6 +2950,7 @@ public class Main : ICustomClass
 
     private bool CanCallBaseTotems(uint callId, OverrideInfo[] overrides, TotemSlotOwner[] owners, out string callReason)
     {
+        if (_callFailCount >= 1) { callReason = "Call failed previously"; return false; }
         if (callId == 0)
         {
             callReason = "Call unavailable";
@@ -3019,13 +3020,15 @@ public class Main : ICustomClass
             }
             return false;
         }
-        else if (_totemState == TotemPresetState.Synced)
+
+        if (!inCombat) return false;
+
+        if (_totemState == TotemPresetState.Synced)
         {
             _totemState = TotemPresetState.ReadyToCall;
             FTLine("[TOTEM MANAGER] Synced -> ReadyToCall");
             return false;
         }
-
         if (_totemState == TotemPresetState.Verified && Environment.TickCount < _nextTotemVerifyTime) return false;
 
         TotemSlotStatus fStat = GetTotemSlotStatus(1, isResto ? c.Resto.ActiveFireTotem : c.Ele.ActiveFireTotem);
@@ -3074,6 +3077,7 @@ public class Main : ICustomClass
         if (_totemState == TotemPresetState.Called && Environment.TickCount >= _totemVerifyTime)
         {
             _totemState = TotemPresetState.ReadyToCall;
+            if (_lastRestoreAction == TotemRestoreAction.GLOBAL_CALL) _callFailCount++;
             FTLine("[TOTEM STATE] Called verification timeout -> ReadyToCall");
         }
 
@@ -3102,6 +3106,7 @@ public class Main : ICustomClass
             if (baseVerified)
             {
                 _totemState = TotemPresetState.Verified;
+                _callFailCount = 0;
                 _lastRestoreAction = TotemRestoreAction.NONE;
                 decision = "STATE TRANSITION";
                 reason = "Base totems restored";
