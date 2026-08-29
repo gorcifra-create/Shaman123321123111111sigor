@@ -2504,25 +2504,98 @@ public class Main : ICustomClass
         return false;
 	}
 
-	private bool State_Universal_Reactions(ConfigCache c)
-	{
-		WoWUnit combatTarget = GetCombatTarget();
-		if (c.Common.UseWindShear && combatTarget != null && ((WoWObject)combatTarget).IsValid && combatTarget.IsAttackable && combatTarget.IsCast)
-		{
-			uint num = ResolveSpell("wind_shear");
-			if (num != 0 && SpellManager.GetSpellCooldownTimeLeft(num) <= 0)
-			{
-				if (((WoWUnit)ObjectManager.Me).Target != ((WoWObject)combatTarget).Guid)
-				{
-					FTLine("[TARGET SWITCH] FSMTick=" + _fsmTickId + " FROM=" + (((WoWUnit)ObjectManager.Me).Target) + " TO=" + combatTarget.Name + " REASON=Wind Shear Target Sync");
-					SafeSetTarget(combatTarget);
-					return false;
-				}
-				SpellManager.CastSpellByIdLUA(num);
-				Logging.Write("[REACT] Wind Shear (" + num + ")");
-				return true;
-			}
-		}
+
+    private bool IsTargetInterruptible(out string spellName, out int timeLeftMs, out bool isChannel)
+    {
+        spellName = "";
+        timeLeftMs = 0;
+        isChannel = false;
+        
+        string lua = @"
+            local spell, _, _, _, startTime, endTime, _, castID, notInterruptible = UnitCastingInfo('target');
+            if spell then
+                if notInterruptible then return 'NO_INTERRUPT' end
+                local timeL = endTime - (GetTime() * 1000)
+                return 'CAST^' .. spell .. '^' .. math.floor(timeL)
+            end
+            local spellC, _, _, _, startTimeC, endTimeC, _, notInterruptibleC = UnitChannelInfo('target');
+            if spellC then
+                if notInterruptibleC then return 'NO_INTERRUPT' end
+                local timeC = endTimeC - (GetTime() * 1000)
+                return 'CHANNEL^' .. spellC .. '^' .. math.floor(timeC)
+            end
+            return 'NONE'
+        ";
+        
+        string result = Lua.LuaDoString<string>(lua, "");
+        if (result == "NONE" || string.IsNullOrEmpty(result)) return false;
+        if (result == "NO_INTERRUPT") return false;
+        
+        string[] parts = result.Split('^');
+        if (parts.Length == 3)
+        {
+            isChannel = parts[0] == "CHANNEL";
+            spellName = parts[1];
+            int.TryParse(parts[2], out timeLeftMs);
+            return true;
+        }
+        return false;
+    }
+
+
+    private bool State_Universal_Reactions(ConfigCache c)
+    {
+        WoWUnit combatTarget = GetCombatTarget();
+
+        // 1. Wind Shear
+        if (c.Common.UseWindShear && combatTarget != null && ((WoWObject)combatTarget).IsValid && combatTarget.IsAttackable && combatTarget.GetDistance <= 25f && combatTarget.IsCast)
+        {
+            uint num = ResolveSpell("wind_shear");
+            if (num != 0 && SpellManager.GetSpellCooldownTimeLeft(num) <= 0 && !HasExpectedState("WindShear"))
+            {
+                // Target Sync must complete BEFORE checking Lua, because Lua targets 'target'
+                if (((WoWUnit)ObjectManager.Me).Target != ((WoWObject)combatTarget).Guid)
+                {
+                    FTLine("[TARGET SWITCH] FSMTick=" + _fsmTickId + " FROM=" + (((WoWUnit)ObjectManager.Me).Target) + " TO=" + combatTarget.Name + " REASON=Wind Shear Target Sync");
+                    SafeSetTarget(combatTarget);
+                    return false; // YIELD
+                }
+
+                string spellName;
+                int timeLeftMs;
+                bool isChannel;
+                
+                bool isInterruptible = IsTargetInterruptible(out spellName, out timeLeftMs, out isChannel);
+                
+                FTLine("[WIND SHEAR] CANDIDATE=" + combatTarget.Name + " CASTING=" + (!isChannel && isInterruptible) + " CHANNELING=" + (isChannel && isInterruptible) + " SPELL=" + spellName + " REMAINING=" + timeLeftMs + "ms INTERRUPTIBLE=" + isInterruptible + " DISTANCE=" + combatTarget.GetDistance.ToString("0.0") + " LOS=True");
+
+                if (isInterruptible)
+                {
+                    // Late interrupt prevention for CASTS (prevent wasting CD when <300ms remains)
+                    if (!isChannel && timeLeftMs < 300 && timeLeftMs > 0)
+                    {
+                        FTLine("[WIND SHEAR BLOCK] FSMTick=" + _fsmTickId + " REASON=Late Cast (" + timeLeftMs + "ms remaining)");
+                    }
+                    else
+                    {
+                        FTLine("[WIND SHEAR CAST] FSMTick=" + _fsmTickId + " TARGET=" + combatTarget.Name + " SPELL=" + spellName + " REASON=Interrupt");
+                        SpellManager.CastSpellByIdLUA(num);
+                        Logging.Write("[REACT] Wind Shear (" + num + ") on " + spellName);
+                        AddExpectedState("WindShear", 1500);
+                        return true;
+                    }
+                }
+                else
+                {
+                    FTLine("[WIND SHEAR BLOCK] FSMTick=" + _fsmTickId + " REASON=Not Interruptible or Finished");
+                }
+            }
+            else if (num == 0)
+            {
+                // Silent block for unknown spell
+            }
+        }
+        
 		bool flag = c.Common.UseCleanseSpirit && ResolveSpell("cleanse_spirit") != 0 && SpellManager.GetSpellCooldownTimeLeft(ResolveSpell("cleanse_spirit")) <= 0 && !HasExpectedState("Cleanse");
 		bool flag2 = c.Common.UseCureDisease && ResolveSpell("cure_disease") != 0 && SpellManager.GetSpellCooldownTimeLeft(ResolveSpell("cure_disease")) <= 0 && !HasExpectedState("Cure");
 		if (flag || flag2)
