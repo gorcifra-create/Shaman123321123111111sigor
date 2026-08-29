@@ -670,7 +670,7 @@ internal class Main : ICustomClass
 		},
 		{
 			"purge",
-			new uint[2] { 8012u, 8011u }
+			new uint[1] { 370u }
 		},
 		{
 			"totemic_recall",
@@ -720,7 +720,11 @@ internal class Main : ICustomClass
 			"tidal_force",
 			new uint[1] { 55198u }
 		},
-		{
+		{    },
+    {
+        "cure_toxins",
+        new uint[2] { 51886u, 526u }
+
 			"fire_elemental_totem",
 			new uint[1] { 2894u }
 		}
@@ -2370,6 +2374,7 @@ internal class Main : ICustomClass
     private CombatSnapshot _combatSnapshot;
     private long _lastSnapshotHash = -1;
     private long _lastCapsHash = -1;
+    private bool _resolverTraced = false;
     private void FSM_Tick()
     {
         _caps.Update(this);
@@ -2378,6 +2383,12 @@ internal class Main : ICustomClass
         {
             FTLine("[CAPABILITY] FSMTick=" + _fsmTickId + " LvB=" + _caps.HasLavaBurst + " LB=" + _caps.HasLightningBolt + " CL=" + _caps.HasChainLightning + " FS=" + _caps.HasFlameShock + " FN=" + _caps.HasFireNova + " TS=" + _caps.HasThunderstorm + " FE=" + _caps.HasFireElemental + " EM=" + _caps.HasElementalMastery + " 4T10=" + _caps.Has4T10 + " ES=" + _caps.HasEarthShock + " WS=" + _caps.HasWindShear + " Purge=" + _caps.HasPurge);
             _lastCapsHash = capsHash;
+        }
+        if (!_resolverTraced)
+        {
+            FTLine("[SPELL RESOLVER] SOURCE=SpellRanks+SpellManager.KnowSpell IMPL=single CACHE=SpellManager(native) LOCALE=key-based(locale-independent) FAILURE=returns-0 INPUT=logical-key OUTPUT=uint RANK=highest-known PURE=true");
+            FTLine("[SPELL RESOLVER MAP] flame_shock=49233 lava_burst=60043 lightning_bolt=49238 chain_lightning=49271 fire_nova=61657 thunderstorm=59159 earth_shock=49231 wind_shear=57994 purge=370 fire_elemental=2894 elemental_mastery=16166");
+            _resolverTraced = true;
         }
         _procState.Update();
 
