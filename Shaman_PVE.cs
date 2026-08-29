@@ -2505,62 +2505,6 @@ public class Main : ICustomClass
 	}
 
 
-
-    private bool IsTargetPurgeable(out string auraName, out string auraType)
-    {
-        auraName = "";
-        auraType = "";
-        
-        string lua = @"
-            local bestName = ''
-            local bestType = ''
-            
-            local whitelist = {
-                ['Power Word: Shield'] = true,
-                ['Ice Barrier'] = true,
-                ['Bloodlust'] = true,
-                ['Heroism'] = true,
-                ['Rejuvenation'] = true,
-                ['Regrowth'] = true,
-                ['Divine Favor'] = true,
-                ['Icy Veins'] = true
-            }
-
-            for i=1,40 do
-                local name, _, _, _, buffType = UnitBuff('target', i)
-                if not name then break end
-                
-                if buffType == 'Magic' then
-                    if whitelist[name] then
-                        return name .. '^' .. buffType .. '^1'
-                    end
-                    if bestName == '' then
-                        bestName = name
-                        bestType = buffType
-                    end
-                end
-            end
-            
-            if bestName ~= '' then
-                return bestName .. '^' .. bestType .. '^0'
-            end
-            
-            return 'NONE'
-        ";
-        
-        string result = Lua.LuaDoString<string>(lua, "");
-        if (result == "NONE" || string.IsNullOrEmpty(result)) return false;
-        
-        string[] parts = result.Split('^');
-        if (parts.Length >= 2)
-        {
-            auraName = parts[0];
-            auraType = parts[1];
-            return true;
-        }
-        return false;
-    }
-
     private bool IsTargetInterruptible(out string spellName, out int timeLeftMs, out bool isChannel)
     {
         spellName = "";
@@ -2727,36 +2671,1512 @@ public class Main : ICustomClass
 				return true;
 			}
 		}
+		if (c.Common.UsePurge && combatTarget != null && combatTarget.IsAlive && combatTarget.IsAttackable && ((WoWUnit)ObjectManager.Me).ManaPercentage > 30)
+		{
+			if (((WoWUnit)ObjectManager.Me).Target != ((WoWObject)combatTarget).Guid)
+				{
+					FTLine("[TARGET SWITCH] FSMTick=" + _fsmTickId + " FROM=" + (((WoWUnit)ObjectManager.Me).Target) + " TO=" + combatTarget.Name + " REASON=Wind Shear Target Sync");
+					SafeSetTarget(combatTarget);
+					return false;
+				}
+			if (Lua.LuaDoString<bool>("for i=1,40 do local name,_,_,_,type = UnitBuff('target', i); if name and (name == 'Power Word: Shield' or name == 'Ice Barrier' or name == 'Bloodlust' or name == 'Heroism' or name == 'Rejuvenation' or name == 'Regrowth' or (type == 'Magic' and UnitMana('player')/UnitManaMax('player') > 0.5)) then return true end end return false;", "") && ResolveSpell("purge") != 0 && SpellManager.GetSpellCooldownTimeLeft(ResolveSpell("purge")) <= 0 && !HasExpectedState("Purge" + ((WoWObject)combatTarget).Guid))
+			{
+				SpellManager.CastSpellByIdLUA(ResolveSpell("purge"));
+				AddExpectedState("Purge" + ((WoWObject)combatTarget).Guid, 1500);
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private bool IsBossLikeTarget(WoWUnit u)
+	{
+		if (u == null || !((WoWObject)u).IsValid)
+		{
+			return false;
+		}
+		return u.IsBoss || (u.Level == 83 && u.MaxHealth > 1000000);
+	}
+
+	private bool State_DBM_Precast(ConfigCache c, bool isResto)
+	{
+		//IL_025c: Unknown result type (might be due to invalid IL or missing references)
+		//IL_0263: Expected O, but got Unknown
+		if (string.IsNullOrEmpty(c.Common.DbmBars))
+		{
+			return false;
+		}
+		string[] array = c.Common.DbmBars.Split(new char[1] { '^' }, StringSplitOptions.RemoveEmptyEntries);
+		string[] array2 = array;
+		string[] array3 = array2;
+		foreach (string text in array3)
+		{
+			string[] array4 = text.Split(':');
+			if (array4.Length != 2)
+			{
+				continue;
+			}
+			string text2 = array4[0].ToLower();
+			float result; if (!float.TryParse(array4[1], NumberStyles.Any, CultureInfo.InvariantCulture, out result))
+			{
+				continue;
+			}
+			if ((text2.Contains("meteor") || text2.Contains("defile") || text2.Contains("blistering")) && result <= 2f)
+			{
+				if (ObjectManager.Me.IsCast)
+				{
+					Lua.LuaDoString("SpellStopCasting();", false);
+					Logging.Write("[God-Tier] DANGER DETECTED: StopCasting!");
+				}
+				return true;
+			}
+			if (!isResto || (!text2.Contains("bonestorm") && !text2.Contains("infest")) || !(result <= 2.5f) || ObjectManager.Me.IsCast || !c.Resto.UseChainHeal || ResolveSpell("chain_heal") == 0)
+			{
+				continue;
+			}
+			List<WoWUnit> precastTargets = ObjectManager.GetObjectWoWPlayer().Where(delegate(WoWPlayer u)
+			{
+				//IL_000a: Unknown result type (might be due to invalid IL or missing references)
+				//IL_0010: Invalid comparison between Unknown and I4
+				return ((WoWUnit)u).IsAlive && (int)((WoWUnit)u).Reaction >= 4 && ((WoWObject)u).GetDistance <= 40f && !TraceLine.TraceLineGo(((WoWObject)ObjectManager.Me).Position, ((WoWObject)u).Position, (CGWorldFrameHitFlags)337);
+			}).Cast<WoWUnit>()
+				.ToList();
+			Dictionary<ulong, int> clusterCounts = precastTargets.ToDictionary((WoWUnit u) => ((WoWObject)u).Guid, (WoWUnit u) => precastTargets.Count((WoWUnit nearby) => ((WoWObject)nearby).Position.DistanceTo2D(((WoWObject)u).Position) <= 12.5f));
+			WoWUnit val = (from u in precastTargets
+				orderby clusterCounts[((WoWObject)u).Guid] descending, u.HealthPercent
+				select u).FirstOrDefault();
+			if (val == null)
+			{
+				val = (WoWUnit)ObjectManager.Me;
+			}
+			if (val != null)
+			{
+				if (((WoWUnit)ObjectManager.Me).Target != ((WoWObject)val).Guid)
+				{
+					SafeSetTarget(val);
+					return true;
+				}
+				SpellManager.CastSpellByIdLUA(ResolveSpell("chain_heal"));
+				return true;
+			}
+		}
+		return false;
+	}
+
+    private enum TotemMatchStatus { MISSING, WRONG, MATCH, NOT_REQUIRED }
 
-        // 2. Purge
-        if (c.Common.UsePurge && combatTarget != null && ((WoWObject)combatTarget).IsValid && combatTarget.IsAlive && combatTarget.IsAttackable && combatTarget.GetDistance <= 30f && ((WoWUnit)ObjectManager.Me).ManaPercentage > 20)
+    private enum TotemSlotOwner
+    {
+        NONE,
+        BASE,
+        OVERRIDE,
+        SPECIAL_DPS
+    }
+
+    private class TotemSlotStatus
+    {
+        public uint ExpectedId;
+        public string ExpectedName;
+        public string ExpectedNormalized;
+        public int ExpectedRank;
+        
+        public uint ActualId;
+        public string ActualName;
+        public string ActualNormalized;
+        public int ActualRank;
+        
+        public TotemMatchStatus Status;
+        public string MatchMethod;
+        public string RankCheck;
+        public string ActualIdSource;
+    }
+
+    private string NormalizeTotemSelection(string raw)
+    {
+        if (string.IsNullOrEmpty(raw)) return "";
+        raw = raw.Trim();
+        if (raw.Equals("None", System.StringComparison.OrdinalIgnoreCase) || raw.Equals("Auto", System.StringComparison.OrdinalIgnoreCase)) return "";
+
+        int metaIdx = raw.IndexOf("#||#");
+        if (metaIdx >= 0)
         {
-            uint num = ResolveSpell("purge");
-            if (num != 0 && SpellManager.GetSpellCooldownTimeLeft(num) <= 0 && !HasExpectedState("Purge"))
-            {
-                // Target Sync must complete BEFORE checking Lua
-                if (((WoWUnit)ObjectManager.Me).Target != ((WoWObject)combatTarget).Guid)
-                {
-                    FTLine("[TARGET SWITCH] FSMTick=" + _fsmTickId + " FROM=" + (((WoWUnit)ObjectManager.Me).Target) + " TO=" + combatTarget.Name + " REASON=Purge Target Sync");
-                    SafeSetTarget(combatTarget);
-                    return false; // YIELD
-                }
+            raw = raw.Substring(0, metaIdx).Trim();
+        }
+        return raw;
+    }
 
-                string auraName;
-                string auraType;
-                
-                bool isPurgeable = IsTargetPurgeable(out auraName, out auraType);
-                
-                if (isPurgeable)
-                {
-                    FTLine("[PURGE] CANDIDATE=" + combatTarget.Name + " AURA=" + auraName + " AURA_TYPE=" + auraType + " DISPELLABLE=True DISTANCE=" + combatTarget.GetDistance.ToString("0.0") + " LOS=True");
-                    FTLine("[PURGE CAST] FSMTick=" + _fsmTickId + " TARGET=" + combatTarget.Name + " AURA=" + auraName + " AURA_TYPE=" + auraType + " REASON=Beneficial Magic");
-                    SpellManager.CastSpellByIdLUA(num);
-                    Logging.Write("[REACT] Purge (" + num + ") on " + auraName);
-                    AddExpectedState("Purge", 1500); // Anti-spam
-                    return true;
-                }
+    private int ExtractTotemRank(string name)
+    {
+        if (string.IsNullOrEmpty(name)) return 0;
+        string n = name.Trim().ToUpperInvariant();
+
+        if (n.EndsWith(" X")) return 10;
+        if (n.EndsWith(" IX")) return 9;
+        if (n.EndsWith(" VIII")) return 8;
+        if (n.EndsWith(" VII")) return 7;
+        if (n.EndsWith(" VI")) return 6;
+        if (n.EndsWith(" V")) return 5;
+        if (n.EndsWith(" IV")) return 4;
+        if (n.EndsWith(" III")) return 3;
+        if (n.EndsWith(" II")) return 2;
+        if (n.EndsWith(" I")) return 1;
+
+        var match = System.Text.RegularExpressions.Regex.Match(n, @"(?:RANK|УРОВЕНЬ|РАНГ)\s*(\d+)");
+        if (match.Success)
+        {
+            int rank = 0;
+            if (int.TryParse(match.Groups[1].Value, out rank))
+            {
+                return rank;
+            }
+        }
+        return 0;
+    }
+
+    private string NormalizeTotemName(string name)
+    {
+        if (string.IsNullOrEmpty(name)) return "";
+        
+        int metaIdx = name.IndexOf("#||#");
+        if (metaIdx >= 0) name = name.Substring(0, metaIdx);
+        
+        string n = name.Trim();
+        
+        int bracketIdx = n.IndexOf("(");
+        if (bracketIdx > 0) n = n.Substring(0, bracketIdx).Trim();
+        
+        string[] roman = { " X", " IX", " VIII", " VII", " VI", " V", " IV", " III", " II", " I" };
+        foreach (var r in roman)
+        {
+            if (n.EndsWith(r))
+            {
+                n = n.Substring(0, n.Length - r.Length).Trim();
+                break;
             }
         }
         
+        n = System.Text.RegularExpressions.Regex.Replace(n, @"(?i)(Уровень|Rank|Ранг)\s*\d+$", "").Trim();
+        return n.ToLowerInvariant();
+    }
+
+    private TotemSlotStatus GetTotemSlotStatus(int slot, string rawConfigValue)
+    {
+        TotemSlotStatus s = new TotemSlotStatus();
+        string normalizedSelection = NormalizeTotemSelection(rawConfigValue);
+        s.ExpectedId = ResolveSpell(normalizedSelection);
+        
+        if (s.ExpectedId == 0)
+        {
+            s.ExpectedName = "None";
+            s.ExpectedNormalized = "none";
+            s.ExpectedRank = 0;
+            s.ActualName = Lua.LuaDoString<string>("local have, name = GetTotemInfo(" + slot + "); if have and name ~= nil and name ~= '' then return name else return 'None' end", "");
+            s.ActualNormalized = (s.ActualName == "None") ? "none" : NormalizeTotemName(s.ActualName);
+            s.ActualRank = (s.ActualName == "None") ? 0 : ExtractTotemRank(s.ActualName);
+            s.ActualId = 0;
+            
+            s.Status = TotemMatchStatus.NOT_REQUIRED;
+            s.MatchMethod = "NONE";
+            s.RankCheck = "NOT_REQUIRED";
+            s.ActualIdSource = "NONE";
+            return s;
+        }
+
+        s.ExpectedName = Lua.LuaDoString<string>("local name = GetSpellInfo(" + s.ExpectedId + "); return name or '';", "");
+        s.ExpectedNormalized = NormalizeTotemName(s.ExpectedName);
+        s.ExpectedRank = ExtractTotemRank(rawConfigValue);
+        if (s.ExpectedRank == 0) s.ExpectedRank = ExtractTotemRank(s.ExpectedName);
+        
+        int luaRank = Lua.LuaDoString<int>("local n, r = GetSpellInfo(" + s.ExpectedId + "); if r then local d = string.match(r, '%d+'); if d then return tonumber(d) end end return 0;", "");
+        if (luaRank > 0) s.ExpectedRank = luaRank;
+
+        s.ActualName = Lua.LuaDoString<string>("local have, name = GetTotemInfo(" + slot + "); if have and name ~= nil and name ~= '' then return name else return 'None' end", "");
+        
+        if (s.ActualName == "None")
+        {
+            s.ActualNormalized = "none";
+            s.ActualRank = 0;
+            s.ActualId = 0;
+            s.Status = TotemMatchStatus.MISSING;
+            s.MatchMethod = "NONE";
+            s.RankCheck = "UNAVAILABLE";
+            s.ActualIdSource = "NONE";
+            return s;
+        }
+
+        s.ActualNormalized = NormalizeTotemName(s.ActualName);
+        s.ActualRank = ExtractTotemRank(s.ActualName);
+        s.ActualId = 0; 
+        
+        s.ActualIdSource = "UNAVAILABLE"; // 3.3.5 GetTotemInfo does not provide raw ID
+
+
+
+        if (s.ExpectedNormalized == s.ActualNormalized)
+        {
+            if (s.ExpectedRank > 0 && s.ActualRank > 0)
+            {
+                if (s.ExpectedRank == s.ActualRank)
+                {
+                    s.Status = TotemMatchStatus.MATCH;
+                    s.MatchMethod = "NAME_RANK";
+                    s.RankCheck = "PASS";
+                }
+                else
+                {
+                    s.Status = TotemMatchStatus.WRONG;
+                    s.MatchMethod = "NAME_RANK";
+                    s.RankCheck = "FAIL";
+                }
+            }
+            else if (s.ExpectedRank == 0 && s.ActualRank == 0)
+            {
+                s.Status = TotemMatchStatus.MATCH;
+                s.MatchMethod = "NAME_ONLY";
+                s.RankCheck = "NOT_APPLICABLE";
+            }
+            else
+            {
+                s.Status = TotemMatchStatus.WRONG;
+                s.MatchMethod = "NAME_RANK_MISMATCH";
+                s.RankCheck = "FAIL";
+            }
+        }
+        else
+        {
+            s.Status = TotemMatchStatus.WRONG;
+            s.MatchMethod = "NAME_MISMATCH";
+            s.RankCheck = "UNAVAILABLE";
+        }
+        
+        return s;
+    }
+    private bool State_TotemCombatOverrides(ConfigCache c, bool isResto)
+    {
+        // Removed logic: Overrides are now natively tracked in State_TotemBasePreset.
+        return false;
+    }
+
+    private class OverrideInfo
+    {
+        public bool Active;
+        public uint SpellId;
+        public string Name;
+        public int Rank;
+        public int Slot;
+        public string MatchMethod;
+    }
+
+    private OverrideInfo GetActiveUtilityOverride(int slot)
+    {
+        OverrideInfo info = new OverrideInfo { Active = false, SpellId = 0, Name = "", Rank = 0, Slot = slot, MatchMethod = "NONE" };
+        
+        string actualName = Lua.LuaDoString<string>("local have, name = GetTotemInfo(" + slot + "); if have and name ~= nil and name ~= '' then return name else return 'None' end", "");
+        if (actualName == "None") return info;
+
+        string norm = NormalizeTotemName(actualName);
+        int rank = ExtractTotemRank(actualName);
+
+        uint[] checkSpells = new uint[0];
+        if (slot == 2) checkSpells = new uint[] { 8143, 2484, 5730, 2062 };
+        else if (slot == 3) checkSpells = new uint[] { 8170, 16190, 8166 };
+        else if (slot == 4) checkSpells = new uint[] { 8177 };
+
+        for (int i = 0; i < checkSpells.Length; i++)
+        {
+            string sName = Lua.LuaDoString<string>("return GetSpellInfo(" + checkSpells[i] + ") or ''", "");
+            int sRank = Lua.LuaDoString<int>("local n, r = GetSpellInfo(" + checkSpells[i] + "); if r then local d = string.match(r, '%d+'); if d then return tonumber(d) end end return 0;", "");
+            
+            if (sName != "" && norm == NormalizeTotemName(sName))
+            {
+                if (sRank == 0 || sRank == rank)
+                {
+                    info.Active = true;
+                    info.SpellId = checkSpells[i];
+                    info.Name = actualName;
+                    info.Rank = rank;
+                    info.MatchMethod = "UTILITY_IDENTITY";
+                    return info;
+                }
+            }
+        }
+
+        return info;
+    }
+
+    private bool CanProceedWithDps(TotemSlotStatus[] baseStatuses, TotemSlotOwner[] owners, out string dpsReason)
+    {
+        for (int i = 0; i < 4; i++)
+        {
+            if (owners[i] == TotemSlotOwner.OVERRIDE) continue;
+            if (owners[i] == TotemSlotOwner.SPECIAL_DPS) continue;
+            
+            if (baseStatuses[i].Status == TotemMatchStatus.MISSING || baseStatuses[i].Status == TotemMatchStatus.WRONG)
+            {
+                dpsReason = "Base incomplete, no override";
+                return false;
+            }
+        }
+        dpsReason = "Base verified or overridden";
+        return true;
+    }
+
+    private bool CanCallBaseTotems(uint callId, OverrideInfo[] overrides, TotemSlotOwner[] owners, out string callReason)
+    {
+        if (_callFailCount >= 1) { callReason = "Call failed previously"; return false; }
+        if (callId == 0)
+        {
+            callReason = "Call unavailable";
+            return false;
+        }
+        for (int i = 0; i < 4; i++)
+        {
+            if (overrides[i] != null && overrides[i].Active)
+            {
+                callReason = "UTILITY_OVERRIDE_ACTIVE";
+                return false;
+            }
+            if (owners[i] == TotemSlotOwner.SPECIAL_DPS)
+            {
+                callReason = "SPECIAL_DPS_ACTIVE";
+                return false;
+            }
+        }
+        callReason = "NO_UTILITY_OVERRIDE";
+        return true;
+    }
+
+    private bool IsBasePresetVerified(TotemSlotStatus[] baseStatuses)
+    {
+        for (int i = 0; i < 4; i++)
+        {
+            if (baseStatuses[i].Status == TotemMatchStatus.MISSING || baseStatuses[i].Status == TotemMatchStatus.WRONG)
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private bool State_TotemBasePreset(ConfigCache c, bool isResto)
+    {
+        uint eId = ResolveSpell(isResto ? c.Resto.ActiveEarthTotem : c.Ele.ActiveEarthTotem);
+        uint fId = ResolveSpell(isResto ? c.Resto.ActiveFireTotem : c.Ele.ActiveFireTotem);
+        uint wId = ResolveSpell(isResto ? c.Resto.ActiveWaterTotem : c.Ele.ActiveWaterTotem);
+        uint aId = ResolveSpell(isResto ? c.Resto.ActiveAirTotem : c.Ele.ActiveAirTotem);
+        uint callId = ResolveSpell("call_of_the_elements");
+
+        bool inCombat = IsEffectiveCombat();
+        bool moving = MovementManager.InMovement;
+
+        if (eId != _lastSyncEarth || fId != _lastSyncFire || wId != _lastSyncWater || aId != _lastSyncAir)
+        {
+            _totemState = TotemPresetState.Dirty;
+            _lastDpsPolicyAllow = false;
+            _policyValid = false;
+            _lastSyncEarth = eId; _lastSyncFire = fId; _lastSyncWater = wId; _lastSyncAir = aId;
+            FTLine("[TOTEM MANAGER] PRESET CHANGED -> Dirty");
+        }
+
+        if (_totemState == TotemPresetState.Dirty)
+        {
+            if (!inCombat)
+            {
+                Lua.LuaDoString("if not InCombatLockdown() then SetMultiCastSpell(133, " + ((fId != 0) ? fId.ToString() : "0") + "); SetMultiCastSpell(134, " + ((eId != 0) ? eId.ToString() : "0") + "); SetMultiCastSpell(135, " + ((wId != 0) ? wId.ToString() : "0") + "); SetMultiCastSpell(136, " + ((aId != 0) ? aId.ToString() : "0") + "); end", false);
+                _totemState = TotemPresetState.Synced;
+                FTLine("[TOTEM MANAGER] OOC Action Bar Updated -> Synced");
+            }
+            else
+            {
+                _totemState = TotemPresetState.ReadyToCall;
+                FTLine("[TOTEM MANAGER] InCombatLockdown -> ReadyToCall");
+            }
+            return false;
+        }
+
+        if (!inCombat) return false;
+
+        if (_totemState == TotemPresetState.Synced)
+        {
+            _totemState = TotemPresetState.ReadyToCall;
+            FTLine("[TOTEM MANAGER] Synced -> ReadyToCall");
+            return false;
+        }
+        if (_totemState == TotemPresetState.Verified && Environment.TickCount < _nextTotemVerifyTime) return false;
+
+        TotemSlotStatus fStat = GetTotemSlotStatus(1, isResto ? c.Resto.ActiveFireTotem : c.Ele.ActiveFireTotem);
+        TotemSlotStatus eStat = GetTotemSlotStatus(2, isResto ? c.Resto.ActiveEarthTotem : c.Ele.ActiveEarthTotem);
+        TotemSlotStatus wStat = GetTotemSlotStatus(3, isResto ? c.Resto.ActiveWaterTotem : c.Ele.ActiveWaterTotem);
+        TotemSlotStatus aStat = GetTotemSlotStatus(4, isResto ? c.Resto.ActiveAirTotem : c.Ele.ActiveAirTotem);
+
+        OverrideInfo oFire = new OverrideInfo { Active = false }; // Fire Ele handled below
+        OverrideInfo oEarth = GetActiveUtilityOverride(2);
+        OverrideInfo oWater = GetActiveUtilityOverride(3);
+        OverrideInfo oAir = GetActiveUtilityOverride(4);
+        
+        string fireEleCanonical = NormalizeTotemName(Lua.LuaDoString<string>("return GetSpellInfo(2894) or ''", ""));
+        bool isFireEleActive = (fStat.ActualNormalized != "" && fStat.ActualNormalized == fireEleCanonical);
+
+        TotemSlotOwner fOwner = isFireEleActive ? TotemSlotOwner.SPECIAL_DPS : ((fStat.Status == TotemMatchStatus.MATCH || fStat.Status == TotemMatchStatus.NOT_REQUIRED) ? TotemSlotOwner.BASE : TotemSlotOwner.NONE);
+        TotemSlotOwner eOwner = oEarth.Active ? TotemSlotOwner.OVERRIDE : ((eStat.Status == TotemMatchStatus.MATCH || eStat.Status == TotemMatchStatus.NOT_REQUIRED) ? TotemSlotOwner.BASE : TotemSlotOwner.NONE);
+        TotemSlotOwner wOwner = oWater.Active ? TotemSlotOwner.OVERRIDE : ((wStat.Status == TotemMatchStatus.MATCH || wStat.Status == TotemMatchStatus.NOT_REQUIRED) ? TotemSlotOwner.BASE : TotemSlotOwner.NONE);
+        TotemSlotOwner aOwner = oAir.Active ? TotemSlotOwner.OVERRIDE : ((aStat.Status == TotemMatchStatus.MATCH || aStat.Status == TotemMatchStatus.NOT_REQUIRED) ? TotemSlotOwner.BASE : TotemSlotOwner.NONE);
+
+        TotemSlotStatus[] baseStatuses = new TotemSlotStatus[] { fStat, eStat, wStat, aStat };
+        TotemSlotOwner[] owners = new TotemSlotOwner[] { fOwner, eOwner, wOwner, aOwner };
+        OverrideInfo[] overrides = new OverrideInfo[] { oFire, oEarth, oWater, oAir };
+
+        int overrideCount = 0;
+        if (oEarth.Active) overrideCount++;
+        if (oWater.Active) overrideCount++;
+        if (oAir.Active) overrideCount++;
+
+        string dpsReason;
+        bool dpsAllowed = CanProceedWithDps(baseStatuses, owners, out dpsReason);
+        _lastDpsPolicyAllow = dpsAllowed;
+        _lastDpsReason = dpsReason;
+        _policyTickId = _fsmTickId;
+        _policyValid = true;
+        _lastOverrideActive = overrideCount > 0;
+        _lastSpecialDpsActive = (owners[0] == TotemSlotOwner.SPECIAL_DPS || owners[1] == TotemSlotOwner.SPECIAL_DPS || owners[2] == TotemSlotOwner.SPECIAL_DPS || owners[3] == TotemSlotOwner.SPECIAL_DPS);
+        bool blockDps = !dpsAllowed;
+
+        string callReason;
+        bool callAllowed = CanCallBaseTotems(callId, overrides, owners, out callReason);
+
+        string decision = "";
+        string reason = "";
+
+        if (_totemState == TotemPresetState.Called && Environment.TickCount >= _totemVerifyTime)
+        {
+            _totemState = TotemPresetState.ReadyToCall;
+            if (_lastRestoreAction == TotemRestoreAction.GLOBAL_CALL) _callFailCount++;
+            FTLine("[TOTEM STATE] Called verification timeout -> ReadyToCall");
+        }
+
+        bool baseVerified = IsBasePresetVerified(baseStatuses);
+        _lastBaseVerified = baseVerified;
+
+        if (_totemState == TotemPresetState.Verified)
+        {
+            if (!baseVerified)
+            {
+                _totemState = TotemPresetState.ReadyToCall;
+                _lastRestoreAction = TotemRestoreAction.NONE;
+                decision = "LOSS DETECTED";
+                reason = "Base totem lost";
+                FTLine("[TOTEM STATE] Verified -> LOSS DETECTED -> ReadyToCall");
+            }
+            else
+            {
+                decision = "VERIFIED";
+                reason = "Base totems intact";
+            }
+        }
+
+        if (_totemState == TotemPresetState.ReadyToCall)
+        {
+            if (baseVerified)
+            {
+                _totemState = TotemPresetState.Verified;
+                _callFailCount = 0;
+                _lastRestoreAction = TotemRestoreAction.NONE;
+                decision = "STATE TRANSITION";
+                reason = "Base totems restored";
+                FTLine("[TOTEM STATE] ReadyToCall -> Verified");
+            }
+            else if (moving)
+            {
+                decision = "WAIT";
+                reason = "Moving";
+            }
+            else if (callAllowed)
+            {
+                if (SpellManager.GetSpellCooldownTimeLeft(callId) <= 0)
+                {
+                    SpellManager.CastSpellByIdLUA(callId);
+                    _totemState = TotemPresetState.Called;
+                    _lastRestoreAction = TotemRestoreAction.GLOBAL_CALL;
+                    _totemVerifyTime = (uint)Environment.TickCount + 1500;
+                    decision = "CALL_OF_THE_ELEMENTS";
+                    reason = "Missing base totems, casting global Call";
+                    FTLine("\n[TOTEM RESTORE ACTION]\nACTION=GLOBAL_CALL\nSLOT=ALL\nSPELL=Call of the Elements\nREASON=" + reason + "\nFSM_STATE=Called\nBASE_VERIFIED=" + baseVerified + "\nDPS_RESULT=" + (dpsAllowed ? "ALLOW" : "BLOCK") + "\n");
+                }
+                else
+                {
+                    decision = "WAIT";
+                    reason = "Call of the Elements on Cooldown";
+                }
+            }
+            else
+            {
+                // Fallbacks
+                if (fOwner == TotemSlotOwner.NONE && fStat.Status != TotemMatchStatus.NOT_REQUIRED && SpellManager.GetSpellCooldownTimeLeft(fId) <= 0) { SpellManager.CastSpellByIdLUA(fId); _totemState = TotemPresetState.Called; _lastRestoreAction = TotemRestoreAction.PARTIAL_FALLBACK; _totemVerifyTime = (uint)Environment.TickCount + 1500; decision = "FALLBACK CAST"; reason = "Fire"; FTLine("\n[TOTEM RESTORE ACTION]\nACTION=PARTIAL_FALLBACK\nSLOT=FIRE\nSPELL=" + fStat.ExpectedName + "\nREASON=Base Missing\nFSM_STATE=Called\nBASE_VERIFIED=" + baseVerified + "\nDPS_RESULT=" + (dpsAllowed ? "ALLOW" : "BLOCK") + "\n"); }
+                else if (eOwner == TotemSlotOwner.NONE && eStat.Status != TotemMatchStatus.NOT_REQUIRED && SpellManager.GetSpellCooldownTimeLeft(eId) <= 0) { SpellManager.CastSpellByIdLUA(eId); _totemState = TotemPresetState.Called; _lastRestoreAction = TotemRestoreAction.PARTIAL_FALLBACK; _totemVerifyTime = (uint)Environment.TickCount + 1500; decision = "FALLBACK CAST"; reason = "Earth"; FTLine("\n[TOTEM RESTORE ACTION]\nACTION=PARTIAL_FALLBACK\nSLOT=EARTH\nSPELL=" + eStat.ExpectedName + "\nREASON=Base Missing\nFSM_STATE=Called\nBASE_VERIFIED=" + baseVerified + "\nDPS_RESULT=" + (dpsAllowed ? "ALLOW" : "BLOCK") + "\n"); }
+                else if (wOwner == TotemSlotOwner.NONE && wStat.Status != TotemMatchStatus.NOT_REQUIRED && SpellManager.GetSpellCooldownTimeLeft(wId) <= 0) { SpellManager.CastSpellByIdLUA(wId); _totemState = TotemPresetState.Called; _lastRestoreAction = TotemRestoreAction.PARTIAL_FALLBACK; _totemVerifyTime = (uint)Environment.TickCount + 1500; decision = "FALLBACK CAST"; reason = "Water"; FTLine("\n[TOTEM RESTORE ACTION]\nACTION=PARTIAL_FALLBACK\nSLOT=WATER\nSPELL=" + wStat.ExpectedName + "\nREASON=Base Missing\nFSM_STATE=Called\nBASE_VERIFIED=" + baseVerified + "\nDPS_RESULT=" + (dpsAllowed ? "ALLOW" : "BLOCK") + "\n"); }
+                else if (aOwner == TotemSlotOwner.NONE && aStat.Status != TotemMatchStatus.NOT_REQUIRED && SpellManager.GetSpellCooldownTimeLeft(aId) <= 0) { SpellManager.CastSpellByIdLUA(aId); _totemState = TotemPresetState.Called; _lastRestoreAction = TotemRestoreAction.PARTIAL_FALLBACK; _totemVerifyTime = (uint)Environment.TickCount + 1500; decision = "FALLBACK CAST"; reason = "Air"; FTLine("\n[TOTEM RESTORE ACTION]\nACTION=PARTIAL_FALLBACK\nSLOT=AIR\nSPELL=" + aStat.ExpectedName + "\nREASON=Base Missing\nFSM_STATE=Called\nBASE_VERIFIED=" + baseVerified + "\nDPS_RESULT=" + (dpsAllowed ? "ALLOW" : "BLOCK") + "\n"); }
+                else
+                {
+                    if (overrideCount > 0)
+                    {
+                        decision = "DEFER";
+                        reason = "ACTIVE_OVERRIDE";
+                    }
+                    else if (fOwner == TotemSlotOwner.SPECIAL_DPS)
+                    {
+                        decision = "DEFER";
+                        reason = "SPECIAL_DPS_ACTIVE";
+                    }
+                    else
+                    {
+                        decision = "WAIT";
+                        reason = "Base incomplete, fallbacks unavailable/cooldown";
+                    }
+                }
+            }
+        }
+        else if (_totemState == TotemPresetState.Called)
+        {
+            decision = "WAIT_FOR_VERIFY";
+            reason = "Waiting for API";
+        }
+
+        if (_totemState == TotemPresetState.Verified && !baseVerified)
+        {
+            FTLine("[FATAL FSM INVARIANT] Verified state with BaseVerified=false");
+            _totemState = TotemPresetState.ReadyToCall;
+            decision = "FATAL_RECOVERY";
+            reason = "Invariant breach";
+        }
+
+        string trace = "[TOTEM OWNER]\n\n" +
+            "FIRE:\nOWNER=" + fOwner.ToString() + "\nBASE_STATUS=" + fStat.Status.ToString() + "\nOVERRIDE=" + oFire.Name + "\nSPECIAL_DPS=" + (isFireEleActive ? fStat.ActualName : "false") + "\n\n" +
+            "EARTH:\nOWNER=" + eOwner.ToString() + "\nBASE_STATUS=" + eStat.Status.ToString() + "\nOVERRIDE=" + (oEarth.Active ? oEarth.Name : "false") + "\n\n" +
+            "WATER:\nOWNER=" + wOwner.ToString() + "\nBASE_STATUS=" + wStat.Status.ToString() + "\nOVERRIDE=" + (oWater.Active ? oWater.Name : "false") + "\n\n" +
+            "AIR:\nOWNER=" + aOwner.ToString() + "\nBASE_STATUS=" + aStat.Status.ToString() + "\nOVERRIDE=" + (oAir.Active ? oAir.Name : "false") + "\n\n" +
+            "[TOTEM CALL POLICY]\n\n" +
+            "CALL_AVAILABLE=" + (callId != 0).ToString() + "\n" +
+            "CALL_DECISION=" + (callAllowed ? "ALLOW" : "BLOCK") + "\n" +
+            "CALL_REASON=" + callReason + "\n\n" +
+            "[TOTEM FSM]\n\n" +
+            "TOTEM_STATE=" + _totemState.ToString() + "\n" +
+            "BASE_VERIFIED=" + baseVerified.ToString() + "\n" +
+            "BASE_VALID=" + baseVerified.ToString() + "\n" +
+            "OVERRIDE_ACTIVE=" + (overrideCount > 0).ToString() + "\n" +
+            "OVERRIDE_SLOTS=" + (oEarth.Active ? "EARTH " : "") + (oWater.Active ? "WATER " : "") + (oAir.Active ? "AIR " : "") + "\n" +
+            "SPECIAL_DPS=" + isFireEleActive.ToString() + "\n" +
+            "DPS_RESULT=" + (dpsAllowed ? "ALLOW" : "BLOCK") + "\n" +
+            "RESTORE_RESULT=" + (decision == "DEFER" ? "DEFER" : (decision == "CALL_OF_THE_ELEMENTS" || decision == "FALLBACK CAST" ? "ALLOW" : "NONE")) + "\n" +
+            "RESTORE_ACTION=" + _lastRestoreAction.ToString() + "\n" +
+            "FSM_DECISION=" + decision + "\n" +
+            "FSM_REASON=" + reason;
+
+        if (trace != _lastTotemTrace)
+        {
+            FTLine(trace);
+            _lastTotemTrace = trace;
+        }
+
+        if (moving != _wasMoving && !moving)
+        {
+            _nextTotemVerifyTime = 0; 
+        }
+        _wasMoving = moving;
+
+        return blockDps;
+    }
+
+    private string _lastTotemTrace = "";
+    private uint _nextTotemVerifyTime = 0;
+    private bool _wasMoving = false;
+private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
+	{
+		FT("[BUFFS FULL] State_BuffsAndTotems");
+		if (((WoWUnit)ObjectManager.Me).IsMounted)
+		{
+			return false;
+		}
+		bool inCombatFlagOnly = IsEffectiveCombat();
+		bool inMovement = MovementManager.InMovement || ((wManager.Wow.ObjectManager.WoWPlayer)ObjectManager.Me).GetMove;
+		FTLine("combat=" + inCombatFlagOnly + " moving=" + inMovement);
+		if (c.Common.TotemRecall && !inCombatFlagOnly && c.Common.TotemAliveTime > 0)
+		{
+			bool flag = Lua.LuaDoString<bool>("local maxTime = " + c.Common.TotemAliveTime + ";for i=1,4 do local have, _, startTime = GetTotemInfo(i); if have and startTime > 0 then local alive = GetTime() - startTime; if alive >= maxTime then return true end end end return false;", "");
+			uint num = ResolveSpell("totemic_recall");
+			if (flag && num != 0 && SpellManager.GetSpellCooldownTimeLeft(num) <= 0)
+			{
+				FTLine("ACTION CAST Totemic Recall");
+				SpellManager.CastSpellByIdLUA(num);
+				FTLine("RETURN TRUE: Buffs.TotemRecall");
+				return true;
+			}
+		}
+		string text = (isResto ? c.Resto.ActiveShield : c.Ele.ActiveShield);
+		FTLine("CHECK Shield: " + text);
+		if (!string.IsNullOrEmpty(text) && !HasExpectedState("Shield"))
+		{
+			uint num2 = ResolveSpell(text);
+			bool flag2 = Lua.LuaDoString<bool>("return UnitBuff('player', GetSpellInfo(" + num2 + ")) ~= nil;", "");
+			FTLine("sId=" + num2 + " hasShield=" + flag2);
+			if (num2 != 0 && !flag2)
+			{
+				FTLine("ACTION CAST Shield " + num2);
+				SpellManager.CastSpellByIdLUA(num2);
+				AddExpectedState("Shield", 1500);
+				FTLine("RETURN TRUE: Buffs.Shield");
+				return true;
+			}
+		}
+		string text2 = (isResto ? c.Resto.ActiveWeapon : c.Ele.ActiveWeapon);
+		FTLine("CHECK Weapon: " + text2);
+		if (!string.IsNullOrEmpty(text2) && !inMovement)
+		{
+			uint num3 = ResolveSpell(text2);
+			FTLine("wepId=" + num3 + " expected=" + HasExpectedState("Weapon"));
+			if (num3 != 0 && !HasExpectedState("Weapon"))
+			{
+				bool flag3 = Lua.LuaDoString<bool>("local h = GetWeaponEnchantInfo(); return h == true or h == 1;", "");
+				float num4 = SpellManager.GetSpellCooldownTimeLeft(num3);
+				FTLine("hasAnyWep=" + flag3 + " cd=" + num4);
+				if (!flag3 && num4 <= 0f)
+				{
+					FTLine("ACTION CAST Weapon " + num3);
+					SpellManager.CastSpellByIdLUA(num3);
+					AddExpectedState("Weapon", 3000);
+					FTLine("RETURN TRUE: Buffs.Weapon");
+					return true;
+				}
+			}
+		}
+		if (inCombatFlagOnly && !inMovement)
+		{
+			FTLine("CHECK Saronite Bomb");
+			if (c.Common.UseSaroniteBomb && ItemsManager.HasItemById(41119u) && Lua.LuaDoString<bool>("local _,d = GetItemCooldown(41119); return d == 0;", "") && !HasExpectedState("SaroniteBomb"))
+			{
+				WoWUnit target = ObjectManager.Target;
+				if (target != null && ((WoWObject)target).IsValid && target.IsAttackable && ((WoWObject)target).GetDistance <= 30f)
+				{
+					FTLine("ACTION USE Saronite Bomb");
+					ItemsManager.UseItem(41119u);
+					ClickOnTerrain.Pulse(((WoWObject)target).Position);
+					AddExpectedState("SaroniteBomb", 2000);
+					FTLine("RETURN TRUE: Buffs.SaroniteBomb");
+					return true;
+				}
+			}
+		}
+		FTLine("RESULT = FALSE -> CONTINUE");
+		return false;
+	}
+
+
+
+	private void State_OffGcdBurst(ConfigCache c, ProcState procs)
+	{
+		WoWUnit combatTarget = GetCombatTarget();
+		if (combatTarget == null || !IsBossLikeTarget(combatTarget))
+		{
+			return;
+		}
+		FT("[BURST CHECK] Off GCD Controller");
+		if (c.Ele.UseElementalMastery && _caps.HasElementalMastery)
+		{
+			uint num = ResolveSpell("elemental_mastery");
+			if (num != 0 && SpellManager.GetSpellCooldownTimeLeft(num) <= 0)
+			{
+				FT("[BURST ACTION] Elemental Mastery");
+				SpellManager.CastSpellByIdLUA(num);
+			}
+		}
+		if (c.Ele.UseRacial)
+		{
+			uint num2 = ResolveSpell("blood_fury");
+			uint num3 = ResolveSpell("berserking");
+			uint num4 = ((num2 != 0) ? num2 : num3);
+			if (num4 != 0 && SpellManager.GetSpellCooldownTimeLeft(num4) <= 0)
+			{
+				FT("[BURST ACTION] Racial");
+				SpellManager.CastSpellByIdLUA(num4);
+			}
+		}
+		if (c.Ele.UseEngGloves && HasOffensiveGloveTinker() && Lua.LuaDoString<bool>("local s,d = GetInventoryItemCooldown('player', 10); return d == 0;", ""))
+		{
+			FT("[BURST ACTION] Engineering Gloves");
+			Lua.LuaDoString("UseInventoryItem(10);", false);
+		}
+	}
+
+	private void State_CoreRotation_Ele(ConfigCache c)
+    {
+        FT("[ELE FULL] State_CoreRotation_Ele");
+        if (ObjectManager.Me.IsCast) { FTLine("RETURN: IS CASTING"); return; }
+        
+        WoWUnit currentTarget = ObjectManager.Target;
+        WoWUnit combatTarget = GetCombatTarget(30f);
+        
+        if (combatTarget == null)
+        {
+            FTLine("RETURN: NO TARGET");
+            return;
+        }
+        
+        if (currentTarget == null || currentTarget.Guid != combatTarget.Guid)
+        {
+            FTLine("[TARGET SWITCH] FSMTick=" + _fsmTickId + " FROM=" + (currentTarget != null ? currentTarget.Name : "null") + " TO=" + combatTarget.Name + " REASON=Fallback Synchronization");
+            SafeSetTarget(combatTarget);
+            FTLine("RETURN: Target Sync");
+            return;
+        }
+        
+        bool moving = MovementManager.InMovement || ((wManager.Wow.ObjectManager.WoWPlayer)ObjectManager.Me).GetMove;
+        // EMERGENCY SELF HEAL (From AIO)
+        if (ObjectManager.Me.HealthPercent < 50)
+        {
+            uint lhwId = ResolveSpell("lesser_healing_wave");
+            if (lhwId != 0 && SpellManager.GetSpellCooldownTimeLeft(lhwId) <= 0)
+            {
+                SpellManager.CastSpellByIdLUA(lhwId);
+                FTLine("RETURN: EMERGENCY HEAL");
+                return;
+            }
+        }
+
+        // CURE TOXINS (From AIO)
+        if (ObjectManager.Me.HaveBuff("Poison") || ObjectManager.Me.HaveBuff("Disease"))
+        {
+            uint cureId = ResolveSpell("cure_toxins");
+            if (cureId != 0 && SpellManager.GetSpellCooldownTimeLeft(cureId) <= 0)
+            {
+                SpellManager.CastSpellByIdLUA(cureId);
+                FTLine("RETURN: CURE TOXINS");
+                return;
+            }
+        }
+
+
+        
+
+        // ---------------------------------------------------------
+        // OFF-GCD BURST COORDINATOR (ATOMIC MACRO)
+        // ---------------------------------------------------------
+        bool bloodlustActive = BuffManager.HaveBuff(((WoWObject)ObjectManager.Me).GetBaseAddress, ResolveSpell("bloodlust")) || BuffManager.HaveBuff(((WoWObject)ObjectManager.Me).GetBaseAddress, ResolveSpell("heroism"));
+        bool burstPhase = IsBossLikeTarget(combatTarget) || bloodlustActive;
+
+        if (burstPhase)
+        {
+            if (c.Ele.UseTrinket1 && !HasExpectedState("Trinket1") && Lua.LuaDoString<bool>("local s, d, e = GetInventoryItemCooldown('player', 13); return s == 0;", ""))
+            {
+                Lua.LuaDoString("UseInventoryItem(13);", false);
+                AddExpectedState("Trinket1", 2000);
+                FTLine("[ELE BURST] Trinket 1 Used");
+            }
+
+            if (c.Ele.UseTrinket2 && !HasExpectedState("Trinket2") && Lua.LuaDoString<bool>("local s, d, e = GetInventoryItemCooldown('player', 14); return s == 0;", ""))
+            {
+                Lua.LuaDoString("UseInventoryItem(14);", false);
+                AddExpectedState("Trinket2", 2000);
+                FTLine("[ELE BURST] Trinket 2 Used");
+            }
+
+            if (c.Ele.UseEngGloves && !HasExpectedState("EngGloves") && Lua.LuaDoString<bool>("local s, d, e = GetInventoryItemCooldown('player', 10); return s == 0;", ""))
+            {
+                Lua.LuaDoString("UseInventoryItem(10);", false);
+                AddExpectedState("EngGloves", 2000);
+                FTLine("[ELE BURST] Gloves Used");
+            }
+
+            if (c.Ele.UseRacial && !HasExpectedState("Racial"))
+            {
+                uint bloodFuryId = ResolveSpell("blood_fury");
+                uint berserkingId = ResolveSpell("berserking");
+                
+                if (bloodFuryId != 0 && SpellManager.GetSpellCooldownTimeLeft(bloodFuryId) <= 0)
+                {
+                    SpellManager.CastSpellByIdLUA(bloodFuryId);
+                    AddExpectedState("Racial", 2000);
+                    FTLine("[ELE BURST] Blood Fury Used");
+                }
+                else if (berserkingId != 0 && SpellManager.GetSpellCooldownTimeLeft(berserkingId) <= 0)
+                {
+                    SpellManager.CastSpellByIdLUA(berserkingId);
+                    AddExpectedState("Racial", 2000);
+                    FTLine("[ELE BURST] Berserking Used");
+                }
+            }
+
+            if (c.Ele.UseElementalMastery && !HasExpectedState("EM"))
+            {
+                uint emId = ResolveSpell("elemental_mastery");
+                if (emId != 0 && SpellManager.GetSpellCooldownTimeLeft(emId) <= 0)
+                {
+                    SpellManager.CastSpellByIdLUA(emId);
+                    AddExpectedState("EM", 2000);
+                    FTLine("[ELE BURST] Elemental Mastery Used");
+                }
+            }
+        }
+        // Fire Elemental (Burst Layer)
+        uint fireEleId = ResolveSpell("fire_elemental_totem");
+        if (c.Ele.UseFireElemental && fireEleId != 0 && IsBossLikeTarget(combatTarget) && SpellManager.GetSpellCooldownTimeLeft(fireEleId) <= 0 && !HasExpectedState("FireEle"))
+        {
+            ProcState procState = default(ProcState);
+            procState.Update();
+            bool goodSnapshot = procState.SnapshotScore >= 500f || procState.ActiveProcsCount >= 2;
+            if (_fireEleWaitStart == 0L) _fireEleWaitStart = Environment.TickCount;
+            bool timeOut = Environment.TickCount - _fireEleWaitStart > 15000;
+            
+            FTLine("FireEle Snapshot: score=" + procState.SnapshotScore + " count=" + procState.ActiveProcsCount + " wait=" + (Environment.TickCount - _fireEleWaitStart));
+            if (goodSnapshot || timeOut)
+            {
+                FTLine("ACTION CAST FireEle");
+                SpellManager.CastSpellByIdLUA(fireEleId);
+                AddExpectedState("FireEle", 2000);
+                _fireEleWaitStart = 0L;
+                FTLine("RETURN TRUE: ELE.FireEle");
+                return;
+            }
+            FTLine("REASON=Waiting for better snapshot");
+            return; // Wait for snapshot!
+        }
+        else
+        {
+            _fireEleWaitStart = 0L;
+        }
+        
+        // ---------------------------------------------------------
+        // Priority 0: Thunderstorm (MANA RECOVERY OVERRIDE)
+        // ---------------------------------------------------------
+        uint tsPri0Id = ResolveSpell("thunderstorm");
+        bool tsPri0Known = tsPri0Id > 0;
+        float tsPri0Cd = tsPri0Known ? SpellManager.GetSpellCooldownTimeLeft(tsPri0Id) : -1f;
+        bool tsPri0Blocked = HasExpectedState("Thunderstorm_Attempt");
+
+        bool tsPri0ManaEligible = c.Ele.ThunderstormMana > 0 && ObjectManager.Me.ManaPercentage <= c.Ele.ThunderstormMana;
+        
+        if (tsPri0Known && c.Ele.UseThunderstorm && tsPri0ManaEligible && tsPri0Cd <= 0 && !tsPri0Blocked)
+        {
+            FTLine("[THUNDERSTORM MANA OVERRIDE] MANA=" + ObjectManager.Me.ManaPercentage + " THRESHOLD=" + c.Ele.ThunderstormMana + " CD=" + tsPri0Cd.ToString("0") + "ms");
+            SpellManager.CastSpellByIdLUA(tsPri0Id);
+            AddExpectedState("Thunderstorm_Attempt", 1500); // Instant cast, GCD + latency
+            FTLine("RETURN TRUE: ELE.Thunderstorm (Mana)");
+            return;
+        }
+
+        // ---------------------------------------------------------
+		// Flame Shock
+		uint fsId = ResolveSpell("flame_shock");
+		bool fsKnown = fsId > 0;
+		float fsCd = fsKnown ? SpellManager.GetSpellCooldownTimeLeft(fsId) : -1f;
+
+		bool hasFs = false;
+		float fsDuration = 0f;
+		if (fsKnown && combatTarget != null && ((WoWObject)combatTarget).IsValid)
+		{
+			wManager.Wow.Class.Aura fsAura = wManager.Wow.Helpers.BuffManager.GetAuras(((WoWObject)combatTarget).GetBaseAddress)
+				.FirstOrDefault(a => a.SpellId == fsId && a.Owner == ((WoWObject)ObjectManager.Me).Guid);
+			if (fsAura != null)
+			{
+				hasFs = true;
+				fsDuration = (float)(fsAura.TimeLeft) / 1000f; // Convert ms to seconds
+			}
+		}
+
+		float fsThreshold = 2.0f; // Configurable boundary
+		bool needFs = fsKnown && fsCd <= 0 && (!hasFs || fsDuration < fsThreshold);
+
+		// Anti-spam check for Immune/LOS failures
+		bool isFsBlocked = HasExpectedState("FlameShock_Attempt");
+
+		FTLine("[FLAME SHOCK] Target=" + combatTarget.Name + " HasFS=" + hasFs + " Remaining=" + fsDuration.ToString("0.0") + "s Threshold=" + fsThreshold.ToString("0.0") + "s NeedFS=" + needFs + " CD=" + fsCd + "ms Blocked=" + isFsBlocked);
+
+		if (c.Ele.UseFlameShock && needFs && !isFsBlocked)
+		{
+			FTLine("[FLAME SHOCK CAST] Target=" + combatTarget.Name + " REASON=" + (!hasFs ? "Missing" : "Refresh Window"));
+			SpellManager.CastSpellByIdLUA(fsId);
+			AddExpectedState("FlameShock_Attempt", 1500); // 1.5s Anti-Spam protection
+			FTLine("RETURN TRUE: ELE.FlameShock");
+			return;
+		}
+        
+        // Lava Burst
+        uint lvbId = ResolveSpell("lava_burst");
+        bool lvbKnown = lvbId > 0;
+        float lvbCd = lvbKnown ? SpellManager.GetSpellCooldownTimeLeft(lvbId) : -1f;
+
+        // Lava Burst is a hard cast in 3.3.5a (no Lava Surge proc exists yet)
+        // Can only be cast while standing still
+        bool lvbEligible = c.Ele.UseLavaBurst && lvbKnown && lvbCd <= 0 && hasFs && !moving;
+        bool isLvbBlocked = HasExpectedState("LavaBurst_Attempt");
+
+        FTLine("[LAVA BURST] Target=" + combatTarget.Name
+            + " FS=" + hasFs + " FS_Rem=" + fsDuration.ToString("0.0") + "s"
+            + " CD=" + lvbCd.ToString("0") + "ms"
+            + " Moving=" + moving
+            + " Eligible=" + lvbEligible + " Blocked=" + isLvbBlocked);
+
+        if (lvbEligible && !isLvbBlocked)
+        {
+            FTLine("[LAVA BURST CAST] Target=" + combatTarget.Name + " REASON=Normal");
+            SpellManager.CastSpellByIdLUA(lvbId);
+            AddExpectedState("LavaBurst_Attempt", 2500); // 2s cast + net latency
+            FTLine("RETURN TRUE: ELE.LavaBurst");
+            return;
+        }
+        else if (lvbKnown && lvbCd <= 0 && hasFs && !lvbEligible && !isLvbBlocked)
+        {
+            FTLine("[LAVA BURST BLOCK] Target=" + combatTarget.Name
+                + " REASON=" + (!c.Ele.UseLavaBurst ? "Disabled" : moving ? "Moving" : !hasFs ? "NoFlameShock" : "Unknown"));
+        }
+
+        
+        // ---------------------------------------------------------
+        // =========================================================
+        // CANONICAL AOE ENGINE (Task #11)
+        // =========================================================
+        Vector3 playerPos = ((WoWObject)ObjectManager.Me).Position;
+        Vector3 targetPos = combatTarget != null ? ((WoWObject)combatTarget).Position : playerPos;
+        bool hasTarget = combatTarget != null;
+
+        int enemiesAroundPlayer = 0;
+        int enemiesAroundTarget = 0;
+
+        // Single deterministic pass over valid hostile units
+        foreach (WoWUnit u in ObjectManager.GetWoWUnitHostile())
+        {
+            if (u.IsAlive && u.IsAttackable && u.InCombatFlagOnly)
+            {
+                float distToPlayer = ((WoWObject)u).Position.DistanceTo(playerPos);
+                if (distToPlayer <= 10f)
+                {
+                    enemiesAroundPlayer++;
+                }
+
+                if (hasTarget && u.Guid != combatTarget.Guid)
+                {
+                    float distToTarget = ((WoWObject)u).Position.DistanceTo(targetPos);
+                    if (distToTarget <= 10f)
+                    {
+                        enemiesAroundTarget++;
+                    }
+                }
+            }
+        }
+
+        int fnTotalTargets = enemiesAroundPlayer; 
+        int tsTotalTargets = enemiesAroundPlayer; 
+        int clTotalTargets = hasTarget ? (1 + enemiesAroundTarget) : 0;
+        int aoeThreshold = 3; // Baseline threshold for AOE logic
+
+        FTLine("[AOE ENGINE] PlayerEnemies(10y)=" + enemiesAroundPlayer
+            + " TargetEnemies(10y)=" + enemiesAroundTarget
+            + " CL_Total=" + clTotalTargets
+            + " THRESHOLD=" + aoeThreshold);
+
+        // ---------------------------------------------------------
+        // ---------------------------------------------------------
+        // Priority 3: Fire Nova (AOE)
+        // ---------------------------------------------------------
+        uint fnId = ResolveSpell("fire_nova");
+        bool fnKnown = fnId > 0;
+        float fnCd = fnKnown ? SpellManager.GetSpellCooldownTimeLeft(fnId) : -1f;
+
+        bool hasFireTotem = false;
+        string fireTotemName = "None";
+        if (fnKnown)
+        {
+            hasFireTotem = Lua.LuaDoString<bool>("local have, name, start, dur = GetTotemInfo(1); return have and name ~= nil and name ~= '' and dur > 0;", "");
+            if (hasFireTotem) {
+                fireTotemName = Lua.LuaDoString<string>("local have, name = GetTotemInfo(1); return name or 'Unknown';", "");
+            }
+        }
+        
+        bool fnAoeEligible = (fnTotalTargets >= aoeThreshold);
+        bool isFnBlocked = HasExpectedState("FireNova_Attempt");
+        
+        bool fnEligible = fnKnown && fnCd <= 0 && hasFireTotem && fnAoeEligible && !isFnBlocked;
+
+        if (fnKnown || fnTotalTargets >= aoeThreshold)
+        {
+            FTLine("[FIRE NOVA] FIRE_TOTEM=" + hasFireTotem + " (" + fireTotemName + ")"
+                + " PLAYER_ENEMIES=" + fnTotalTargets + " THRESHOLD=" + aoeThreshold
+                + " CD=" + fnCd.ToString("0") + "ms"
+                + " Eligible=" + fnEligible + " Blocked=" + isFnBlocked);
+        }
+
+        if (fnEligible)
+        {
+            FTLine("[FIRE NOVA CAST] FIRE_TOTEM=" + fireTotemName + " ENEMY_COUNT=" + fnTotalTargets + " REASON=AOE");
+            SpellManager.CastSpellByIdLUA(fnId);
+            AddExpectedState("FireNova_Attempt", 1500); // Instant cast, GCD + latency
+            FTLine("RETURN TRUE: ELE.FireNova");
+            return;
+        }
+        else if (fnKnown && fnTotalTargets >= aoeThreshold && fnCd <= 0 && !isFnBlocked)
+        {
+            string fnReason = !hasFireTotem ? "NoFireTotem" : "Unknown";
+            FTLine("[FIRE NOVA BLOCK] REASON=" + fnReason);
+        }
+        // Priority 4: Chain Lightning (AOE or ST)
+        // ---------------------------------------------------------
+        uint clId = ResolveSpell("chain_lightning");
+        bool clKnown = clId > 0;
+        float clCd = clKnown ? SpellManager.GetSpellCooldownTimeLeft(clId) : -1f;
+        
+        bool clIsAoeEligible = (clTotalTargets >= aoeThreshold);
+        bool clIsStEligible = (!c.Ele.ChainLightningAoe && ObjectManager.Me.ManaPercentage > 60);
+        
+        bool clEligible = c.Ele.UseChainLightning && clKnown && clCd <= 0 && !moving && (clIsAoeEligible || clIsStEligible);
+        bool isClBlocked = HasExpectedState("ChainLightning_Attempt");
+
+        FTLine("[CHAIN LIGHTNING] Target=" + combatTarget.Name
+            + " CL_Targets=" + clTotalTargets + " Threshold=" + aoeThreshold
+            + " CD=" + clCd.ToString("0") + "ms" + " Moving=" + moving
+            + " Mana=" + ObjectManager.Me.ManaPercentage + "%"
+            + " Eligible=" + clEligible + " Blocked=" + isClBlocked);
+
+        if (clEligible && !isClBlocked)
+        {
+            FTLine("[CHAIN LIGHTNING CAST] Target=" + combatTarget.Name 
+                + " ENEMY_COUNT=" + clTotalTargets 
+                + " REASON=" + (clIsAoeEligible ? "AOE" : "ST"));
+            SpellManager.CastSpellByIdLUA(clId);
+            AddExpectedState("ChainLightning_Attempt", 2500); // 2s cast base + latency
+            FTLine("RETURN TRUE: ELE.ChainLightning");
+            return;
+        }
+        else if (clKnown && clCd <= 0 && !clEligible && !isClBlocked)
+        {
+            string clReason = !c.Ele.UseChainLightning ? "Disabled" : 
+                              moving ? "Moving" : 
+                              (c.Ele.ChainLightningAoe && !clIsAoeEligible) ? "AoeCountNotMet" : 
+                              (!clIsAoeEligible && ObjectManager.Me.ManaPercentage <= 60) ? "LowManaForST" : "Unknown";
+            FTLine("[CHAIN LIGHTNING BLOCK] Target=" + combatTarget.Name + " REASON=" + clReason);
+        }
+
+        // ---------------------------------------------------------
+        // ---------------------------------------------------------
+        // Priority 5: Thunderstorm (AOE / MANA)
+        // ---------------------------------------------------------
+        uint tsId = ResolveSpell("thunderstorm");
+        bool tsKnown = tsId > 0;
+        float tsCd = tsKnown ? SpellManager.GetSpellCooldownTimeLeft(tsId) : -1f;
+
+        bool tsBlocked = HasExpectedState("Thunderstorm_Attempt");
+        
+        bool tsAoeEligible = c.Ele.ThunderstormAoe && (tsTotalTargets >= aoeThreshold);
+        
+        bool tsEligible = c.Ele.UseThunderstorm && tsKnown && tsCd <= 0 && !tsBlocked && (tsAoeEligible);
+
+        if (tsKnown || tsAoeEligible)
+        {
+            FTLine("[THUNDERSTORM] PLAYER_ENEMIES=" + tsTotalTargets + " THRESHOLD=" + aoeThreshold
+                + " MANA=" + ObjectManager.Me.ManaPercentage + " MANA_THRESHOLD=" + c.Ele.ThunderstormMana
+                + " AOE_FLAG=" + c.Ele.ThunderstormAoe + " CD=" + tsCd.ToString("0") + "ms"
+                + " Eligible=" + tsEligible + " Blocked=" + tsBlocked);
+        }
+
+        if (tsEligible)
+        {
+            string tsReason = "AOE";
+            FTLine("[THUNDERSTORM CAST] ENEMY_COUNT=" + tsTotalTargets + " MANA=" + ObjectManager.Me.ManaPercentage + " REASON=" + tsReason);
+            SpellManager.CastSpellByIdLUA(tsId);
+            AddExpectedState("Thunderstorm_Attempt", 1500); // Instant cast, GCD + latency
+            FTLine("RETURN TRUE: ELE.Thunderstorm");
+            return;
+        }
+        else if (tsKnown && tsAoeEligible && tsCd <= 0 && !tsBlocked)
+        {
+            FTLine("[THUNDERSTORM BLOCK] REASON=DisabledByConfig");
+        }
+        // Priority 6: Lightning Bolt (Filler)
+        // ---------------------------------------------------------
+        uint lbId = ResolveSpell("lightning_bolt");
+        bool lbKnown = lbId > 0;
+        bool lbEligible = c.Ele.UseLightningBolt && lbKnown && !moving;
+        bool isLbBlocked = HasExpectedState("LightningBolt_Attempt");
+
+        FTLine("[LIGHTNING BOLT] Target=" + combatTarget.Name
+            + " Moving=" + moving
+            + " Eligible=" + lbEligible + " Blocked=" + isLbBlocked);
+
+        if (lbEligible && !isLbBlocked)
+        {
+            FTLine("[LIGHTNING BOLT CAST] Target=" + combatTarget.Name + " REASON=Filler");
+            SpellManager.CastSpellByIdLUA(lbId);
+            AddExpectedState("LightningBolt_Attempt", 2500); // 2.5s base (reduced by talents/haste) + latency
+            FTLine("RETURN TRUE: ELE.LightningBolt");
+            return;
+        }
+        else if (lbKnown && !lbEligible && !isLbBlocked)
+        {
+            FTLine("[LIGHTNING BOLT BLOCK] Target=" + combatTarget.Name
+                + " REASON=" + (!c.Ele.UseLightningBolt ? "Disabled" : moving ? "Moving" : "Unknown"));
+        }
+
+        // Earth Shock (Movement Fallback)
+        if (moving)
+        {
+            uint esId = ResolveSpell("earth_shock");
+            float esCd = esId > 0 ? SpellManager.GetSpellCooldownTimeLeft(esId) : -1f;
+            bool esEligible = c.Ele.UseEarthShock && esId > 0 && esCd <= 0;
+            
+            FTLine("[EARTH SHOCK] TARGET=" + combatTarget.Name + " MOVING=" + moving + " ES_COOLDOWN=" + esCd + " ELIGIBLE=" + esEligible);
+            
+            if (esEligible)
+            {
+                FTLine("[EARTH SHOCK CAST] TARGET=" + combatTarget.Name + " MAELSTROM=NONE REASON=Movement");
+                SpellManager.CastSpellByIdLUA(esId);
+                AddExpectedState("EarthShock", 1500);
+                FTLine("RETURN TRUE: ELE.EarthShock");
+                return;
+            }
+            else
+            {
+                FTLine("[EARTH SHOCK BLOCK] REASON=" + (!c.Ele.UseEarthShock ? "Disabled" : "Cooldown"));
+            }
+        }
+        
+
+
+        // Frost Shock (Movement Fallback)
+        if (moving)
+        {
+            uint frsId = ResolveSpell("frost_shock");
+            float frsCd = frsId > 0 ? SpellManager.GetSpellCooldownTimeLeft(frsId) : -1f;
+            bool frsEligible = c.Ele.UseFrostShock && frsId > 0 && frsCd <= 0;
+            
+            FTLine("[FROST SHOCK] TARGET=" + combatTarget.Name + " MOVING=" + moving + " FRS_COOLDOWN=" + frsCd + " ELIGIBLE=" + frsEligible);
+            
+            if (frsEligible)
+            {
+                FTLine("[FROST SHOCK CAST] TARGET=" + combatTarget.Name + " REASON=Movement");
+                SpellManager.CastSpellByIdLUA(frsId);
+                AddExpectedState("FrostShock", 1500);
+                FTLine("RETURN TRUE: ELE.FrostShock");
+                return;
+            }
+            else
+            {
+                FTLine("[FROST SHOCK BLOCK] REASON=" + (!c.Ele.UseFrostShock ? "Disabled" : "Cooldown"));
+            }
+        }
+        FTLine("RESULT = NO SPELL CAST");
+    }
+
+	private bool State_CoreRotation_Resto(ConfigCache c)
+	{
+		//IL_00ac: Unknown result type (might be due to invalid IL or missing references)
+		//IL_00b6: Expected O, but got Unknown
+		List<WoWUnit> list = ObjectManager.GetObjectWoWPlayer().Where(delegate(WoWPlayer u)
+		{
+			//IL_000a: Unknown result type (might be due to invalid IL or missing references)
+			//IL_0010: Invalid comparison between Unknown and I4
+			return ((WoWUnit)u).IsAlive && (int)((WoWUnit)u).Reaction >= 4 && ((WoWObject)u).GetDistance <= 40f && !TraceLine.TraceLineGo(((WoWObject)ObjectManager.Me).Position, ((WoWObject)u).Position, (CGWorldFrameHitFlags)337);
+		}).Cast<WoWUnit>()
+			.ToList();
+		if (c.Resto.ValithriaEnable)
+		{
+			WoWUnit val = ObjectManager.GetObjectWoWUnit().FirstOrDefault((WoWUnit u) => ((WoWObject)u).Entry == 36789 && u.IsAlive && ((WoWObject)u).GetDistance <= 40f && !TraceLine.TraceLineGo(((WoWObject)ObjectManager.Me).Position, ((WoWObject)u).Position, (CGWorldFrameHitFlags)337));
+			if (val != null)
+			{
+				list.Add(val);
+			}
+		}
+		list.Add((WoWUnit)ObjectManager.Me);
+		list = list.Distinct().ToList();
+		if (list.Count == 0)
+		{
+			return false;
+		}
+		TrackHealth(list);
+		float num = 100f;
+		foreach (WoWUnit item in list)
+		{
+			if (item.HealthPercent < (double)num)
+			{
+				num = (float)item.HealthPercent;
+			}
+		}
+		WoWUnit tank = null;
+		int num2 = -1;
+		foreach (WoWUnit item2 in list)
+		{
+			int tankScore = GetTankScore(item2, c);
+			if (tankScore > num2)
+			{
+				num2 = tankScore;
+				tank = item2;
+			}
+		}
+		if (c.Resto.EarthShieldRefresh && tank != null && !HasExpectedState("EarthShield"))
+		{
+			bool flag = true;
+			Aura val2 = BuffManager.GetAuras(((WoWObject)tank).GetBaseAddress).FirstOrDefault((Aura a) => a.SpellId == 49284);
+			if (val2 != null && val2.TimeLeft > c.Resto.EarthShieldRefreshThresholdMs)
+			{
+				flag = false;
+			}
+			if (flag && ResolveSpell("earth_shield") != 0 && SpellManager.GetSpellCooldownTimeLeft(ResolveSpell("earth_shield")) <= 0)
+			{
+				if (((WoWUnit)ObjectManager.Me).Target != ((WoWObject)tank).Guid)
+				{
+					SafeSetTarget(tank);
+					return true;
+				}
+				SpellManager.CastSpellByIdLUA(ResolveSpell("earth_shield"));
+				AddExpectedState("EarthShield", 2000);
+				return true;
+			}
+		}
+		bool flag2 = c.Resto.ValithriaEnable && list.Any((WoWUnit x) => ((WoWObject)x).Entry == 36789 && x.HealthPercent < 100.0);
+		if (list.Count == 0)
+		{
+			return false;
+		}
+		if (num < 65f || flag2)
+		{
+			if (c.Resto.UseRacial && !HasExpectedState("Racial"))
+			{
+				uint num3 = ResolveSpell("blood_fury");
+				uint num4 = ResolveSpell("berserking");
+				if (num3 != 0 && SpellManager.GetSpellCooldownTimeLeft(num3) <= 0)
+				{
+					SpellManager.CastSpellByIdLUA(num3);
+					AddExpectedState("Racial", 120000);
+					Logging.Write("[RESTO OFFGCD] Blood Fury (" + num3 + ")");
+					return true;
+				}
+				if (num4 != 0 && SpellManager.GetSpellCooldownTimeLeft(num4) <= 0)
+				{
+					SpellManager.CastSpellByIdLUA(num4);
+					AddExpectedState("Racial", 180000);
+					Logging.Write("[RESTO OFFGCD] Berserking (" + num4 + ")");
+					return true;
+				}
+			}
+			if (c.Resto.UseTrinket1 && !HasExpectedState("T1") && Lua.LuaDoString<bool>("local _,d,_=GetInventoryItemCooldown('player',13); return d==0;", ""))
+			{
+				Lua.LuaDoString("UseInventoryItem(13);", false);
+				AddExpectedState("T1", 120000);
+				Logging.Write("[RESTO OFFGCD] Trinket 1");
+				return true;
+			}
+			if (c.Resto.UseTrinket2 && !HasExpectedState("T2") && Lua.LuaDoString<bool>("local _,d,_=GetInventoryItemCooldown('player',14); return d==0;", ""))
+			{
+				Lua.LuaDoString("UseInventoryItem(14);", false);
+				AddExpectedState("T2", 120000);
+				Logging.Write("[RESTO OFFGCD] Trinket 2");
+				return true;
+			}
+			if (c.Resto.UseEngGloves && !HasExpectedState("Gloves") && Lua.LuaDoString<bool>("local _,d,_=GetInventoryItemCooldown('player',10); return d==0;", ""))
+			{
+				Lua.LuaDoString("UseInventoryItem(10);", false);
+				AddExpectedState("Gloves", 60000);
+				Logging.Write("[RESTO OFFGCD] Eng Gloves");
+				return true;
+			}
+		}
+		if (_panicState != PanicState.None)
+		{
+			if ((uint)(Environment.TickCount - (int)_panicDeadline) < 2147483648u)
+			{
+				_panicState = PanicState.None;
+				Logging.Write("[RESTO PANIC] Sequence expired or interrupted");
+			}
+			else
+			{
+				WoWUnit val3 = list.FirstOrDefault((WoWUnit x) => ((WoWObject)x).Guid == _panicTargetGuid);
+				if (val3 != null && val3.IsAlive && val3.HealthPercent < 40.0)
+				{
+					if (((WoWUnit)ObjectManager.Me).Target != ((WoWObject)val3).Guid)
+					{
+						SafeSetTarget(val3);
+						return true;
+					}
+					if (_panicState == PanicState.CastNS)
+					{
+						if (c.Resto.UseNaturesSwiftness && ResolveSpell("natures_swiftness") != 0 && !Lua.LuaDoString<bool>("return UnitBuff('player', GetSpellInfo(" + ResolveSpell("natures_swiftness") + ")) ~= nil;", ""))
+						{
+							if (SpellManager.GetSpellCooldownTimeLeft(ResolveSpell("natures_swiftness")) <= 0)
+							{
+								SpellManager.CastSpellByIdLUA(ResolveSpell("natures_swiftness"));
+							}
+							return true;
+						}
+						_panicState = PanicState.CastTidal;
+					}
+					if (_panicState == PanicState.CastTidal)
+					{
+						if (c.Resto.UseNaturesSwiftness && ResolveSpell("tidal_force") != 0 && !Lua.LuaDoString<bool>("return UnitBuff('player', GetSpellInfo(" + ResolveSpell("tidal_force") + ")) ~= nil;", ""))
+						{
+							if (SpellManager.GetSpellCooldownTimeLeft(ResolveSpell("tidal_force")) <= 0)
+							{
+								SpellManager.CastSpellByIdLUA(ResolveSpell("tidal_force"));
+							}
+							return true;
+						}
+						_panicState = PanicState.CastHW;
+					}
+					if (_panicState == PanicState.CastHW)
+					{
+						if (c.Resto.UseHealingWave && ResolveSpell("healing_wave") != 0)
+						{
+							SpellManager.CastSpellByIdLUA(ResolveSpell("healing_wave"));
+						}
+						_panicState = PanicState.None;
+						return true;
+					}
+				}
+				else
+				{
+					_panicState = PanicState.None;
+				}
+			}
+		}
+		List<WoWUnit> list2 = (from val8 in list
+			where val8.HealthPercent < 20.0
+			orderby val8.HealthPercent - (double)((tank != null && ((WoWObject)val8).Guid == ((WoWObject)tank).Guid) ? 30f : 0f)
+			select val8).ToList();
+		if (list2.Count > 0 && _panicState == PanicState.None)
+		{
+			WoWUnit val4 = list2.First();
+			if (c.Resto.UseNaturesSwiftness && ResolveSpell("natures_swiftness") != 0 && SpellManager.GetSpellCooldownTimeLeft(ResolveSpell("natures_swiftness")) <= 0)
+			{
+				_panicState = PanicState.CastNS;
+				_panicTargetGuid = ((WoWObject)val4).Guid;
+				_panicDeadline = (uint)(Environment.TickCount + 3000);
+				Logging.Write("[RESTO PANIC] Initiating NS Sequence on " + ((WoWObject)val4).Name);
+				if (((WoWUnit)ObjectManager.Me).Target != ((WoWObject)val4).Guid)
+				{
+					SafeSetTarget(val4);
+					return true;
+				}
+				return true;
+			}
+		}
+		if (flag2 && c.Resto.UseHealingWave && ResolveSpell("healing_wave") != 0 && !MovementManager.InMovement)
+		{
+			WoWUnit val5 = list.FirstOrDefault((WoWUnit x) => ((WoWObject)x).Entry == 36789 && x.HealthPercent < 100.0);
+			if (val5 != null)
+			{
+				if (((WoWUnit)ObjectManager.Me).Target != ((WoWObject)val5).Guid)
+				{
+					SafeSetTarget(val5);
+					return true;
+				}
+				SpellManager.CastSpellByIdLUA(ResolveSpell("healing_wave"));
+				return true;
+			}
+		}
+		float bonusHealing = Lua.LuaDoString<float>("return GetSpellBonusHealing();", "");
+		float num5 = 0f;
+		WoWUnit val6 = null;
+		string text = "";
+		uint num6 = 0u;
+		bool flag3 = BuffManager.HaveBuff(((WoWObject)ObjectManager.Me).GetBaseAddress, 53390u) || BuffManager.HaveBuff(((WoWObject)ObjectManager.Me).GetBaseAddress, 51564u);
+		bool flag4 = c.Resto.LowManaLhwEnable && ((WoWUnit)ObjectManager.Me).ManaPercentage < 30;
+		foreach (WoWUnit p in list)
+		{
+			if (c.Resto.UseHealingWave && ResolveSpell("healing_wave") != 0 && !MovementManager.InMovement && !flag4)
+			{
+				float num7 = CalcHealScore(p, tank, GetExpectedHeal(ResolveSpell("healing_wave"), bonusHealing), c, c.Resto.AllowedOverhealPct, 2f, GetTankBonus(p, tank));
+				if (flag3)
+				{
+					num7 *= 1.3f;
+				}
+				if (num7 > num5)
+				{
+					num5 = num7;
+					val6 = p;
+					text = "healing_wave";
+					num6 = ResolveSpell("healing_wave");
+				}
+			}
+			if (c.Resto.LesserHealingWaveEnable && ResolveSpell("lesser_healing_wave") != 0 && !MovementManager.InMovement)
+			{
+				float num7 = CalcHealScore(p, tank, GetExpectedHeal(ResolveSpell("lesser_healing_wave"), bonusHealing), c, c.Resto.AllowedOverhealPct, 1.5f, GetTankBonus(p, tank));
+				if (flag3)
+				{
+					num7 *= 1.4f;
+				}
+				if (flag4)
+				{
+					num7 *= 2f;
+				}
+				if (num7 > num5)
+				{
+					num5 = num7;
+					val6 = p;
+					text = "lesser_healing_wave";
+					num6 = ResolveSpell("lesser_healing_wave");
+				}
+			}
+			if (c.Resto.UseRiptide && ResolveSpell("riptide") != 0 && SpellManager.GetSpellCooldownTimeLeft(ResolveSpell("riptide")) <= 0 && !BuffManager.HaveBuff(((WoWObject)p).GetBaseAddress, ResolveSpell("riptide")))
+			{
+				float num7 = CalcHealScore(p, tank, GetExpectedHeal(ResolveSpell("riptide"), bonusHealing), c, c.Resto.AllowedOverhealPct, 0f, c.Resto.RiptideTank ? GetTankBonus(p, tank, 1.5f) : 0f);
+				if (MovementManager.InMovement)
+				{
+					num7 *= 3f;
+				}
+				if (num7 > num5)
+				{
+					num5 = num7;
+					val6 = p;
+					text = "riptide";
+					num6 = ResolveSpell("riptide");
+				}
+			}
+			if (!c.Resto.UseChainHeal || ResolveSpell("chain_heal") == 0 || MovementManager.InMovement || flag4)
+			{
+				continue;
+			}
+			float num8 = 0f;
+			float expectedHeal = GetExpectedHeal(ResolveSpell("chain_heal"), bonusHealing);
+			WoWUnit curr = p;
+			List<WoWUnit> list3 = new List<WoWUnit>();
+			List<WoWUnit> list4 = list.Where((WoWUnit t) => ((WoWObject)t).Guid != ((WoWObject)p).Guid).ToList();
+			num8 += CalcHealScore(curr, tank, expectedHeal * (BuffManager.HaveBuff(((WoWObject)curr).GetBaseAddress, ResolveSpell("riptide")) ? 1.25f : 1f), c, c.Resto.AllowedOverhealPct, 2.5f);
+			float nextHeal = expectedHeal * 0.6f;
+			for (int num9 = 0; num9 < 3; num9++)
+			{
+				WoWUnit val7 = (from t in list4
+					where ((WoWObject)curr).Position.DistanceTo2D(((WoWObject)t).Position) <= 12.5f
+					orderby CalcHealScore(t, tank, nextHeal, c, c.Resto.AllowedOverhealPct, 2.5f, GetTankBonus(t, tank, 0.5f)) descending
+					select t).FirstOrDefault();
+				if (val7 == null)
+				{
+					break;
+				}
+				list3.Add(val7);
+				list4.Remove(val7);
+				num8 += CalcHealScore(val7, tank, nextHeal, c, c.Resto.AllowedOverhealPct, 2.5f);
+				nextHeal *= 0.6f;
+				curr = val7;
+			}
+			if (list3.Count >= 1 && num8 > num5)
+			{
+				num5 = num8;
+				val6 = p;
+				text = "chain_heal";
+				num6 = ResolveSpell("chain_heal");
+			}
+		}
+		if (val6 != null && num5 > 0f)
+		{
+			if (((WoWUnit)ObjectManager.Me).Target != ((WoWObject)val6).Guid)
+			{
+				SafeSetTarget(val6);
+				return true;
+			}
+			SpellManager.CastSpellByIdLUA(num6);
+			if (text == "riptide")
+			{
+				AddExpectedState("Riptide" + ((WoWObject)val6).Guid, 1000);
+			}
+			return true;
+		}
+		return false;
+	}
+}
+
 // Clean Cache Buster
