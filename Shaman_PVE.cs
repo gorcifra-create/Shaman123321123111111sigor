@@ -3203,62 +3203,7 @@ internal class Main : ICustomClass
 			
 			return precastActionTaken;
 		}
-		string[] array = c.Common.DbmBars.Split(new char[1] { '^' }, StringSplitOptions.RemoveEmptyEntries);
-		string[] array2 = array;
-		string[] array3 = array2;
-		foreach (string text in array3)
-		{
-			string[] array4 = text.Split(':');
-			if (array4.Length != 2)
-			{
-				continue;
-			}
-			string text2 = array4[0].ToLower();
-			float result; if (!float.TryParse(array4[1], NumberStyles.Any, CultureInfo.InvariantCulture, out result))
-			{
-				continue;
-			}
-			if ((text2.Contains("meteor") || text2.Contains("defile") || text2.Contains("blistering")) && result <= 2f)
-			{
-				if (ObjectManager.Me.IsCast)
-				{
-					Lua.LuaDoString("SpellStopCasting();", false);
-					Logging.Write("[God-Tier] DANGER DETECTED: StopCasting!");
-				}
-				return true;
-			}
-			if (!isResto || (!text2.Contains("bonestorm") && !text2.Contains("infest")) || !(result <= 2.5f) || ObjectManager.Me.IsCast || !c.Resto.UseChainHeal || ResolveSpell("chain_heal") == 0)
-			{
-				continue;
-			}
-			List<WoWUnit> precastTargets = ObjectManager.GetObjectWoWPlayer().Where(delegate(WoWPlayer u)
-			{
-				//IL_000a: Unknown result type (might be due to invalid IL or missing references)
-				//IL_0010: Invalid comparison between Unknown and I4
-				return ((WoWUnit)u).IsAlive && (int)((WoWUnit)u).Reaction >= 4 && ((WoWObject)u).GetDistance <= 40f && !TraceLine.TraceLineGo(((WoWObject)ObjectManager.Me).Position, ((WoWObject)u).Position, (CGWorldFrameHitFlags)337);
-			}).Cast<WoWUnit>()
-				.ToList();
-			Dictionary<ulong, int> clusterCounts = precastTargets.ToDictionary((WoWUnit u) => ((WoWObject)u).Guid, (WoWUnit u) => precastTargets.Count((WoWUnit nearby) => ((WoWObject)nearby).Position.DistanceTo2D(((WoWObject)u).Position) <= 12.5f));
-			WoWUnit val = (from u in precastTargets
-				orderby clusterCounts[((WoWObject)u).Guid] descending, u.HealthPercent
-				select u).FirstOrDefault();
-			if (val == null)
-			{
-				val = (WoWUnit)ObjectManager.Me;
-			}
-			if (val != null)
-			{
-				if (((WoWUnit)ObjectManager.Me).Target != ((WoWObject)val).Guid)
-				{
-					SafeSetTarget(val);
-					return true;
-				}
-				FastCastById(ResolveSpell("chain_heal"));
-				return true;
-			}
-		}
-		return false;
-	}
+		
 
     private enum TotemMatchStatus { MISSING, WRONG, MATCH, NOT_REQUIRED }
 
