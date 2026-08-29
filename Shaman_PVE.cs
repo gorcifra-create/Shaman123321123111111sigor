@@ -64,38 +64,51 @@ public class Main : ICustomClass
 		}
 	}
 
-	private struct ProcState
-	{
-		public bool HasBloodlust;
-
-		public bool HasPotionActive;
-
-		public bool HasTrinketProc;
-
-		public bool HasClearcasting;
-
-		public int ActiveProcsCount;
-
-		public float SnapshotScore;
-
-		public void Update()
-		{
-			string text = Lua.LuaDoString<string>("\n                local score = 0;\n                local count = 0;\n                local bl = 0; local pot = 0; local trinket = 0; local cc = 0;\n                for i=1,40 do\n                    local name,_,_,_,_,_,_,_,_,_,id = UnitBuff('player', i);\n                    if not name then break end\n                    if id == 2825 or id == 32182 then bl = 1; score = score + 500; count = count + 1; end\n                    if id == 16246 then cc = 1; end\n                    if id == 53908 or id == 53909 then pot = 1; score = score + 200; count = count + 1; end\n                    local trinkets = {59077, 64713, 60492, 60494, 71570, 71572, 72416, 75466, 65006, 65011, 64712, 64713, 59626, 67669, 67671};\n                    for _, tid in ipairs(trinkets) do\n                        if id == tid then trinket = 1; score = score + 300; count = count + 1; break; end\n                    end\n                end\n                return tostring(bl) .. '|' .. tostring(pot) .. '|' .. tostring(trinket) .. '|' .. tostring(cc) .. '|' .. tostring(count) .. '|' .. tostring(score);\n            ", "");
-			if (!string.IsNullOrEmpty(text))
-			{
-				string[] array = text.Split('|');
-				if (array.Length == 6)
-				{
-					HasBloodlust = array[0] == "1";
-					HasPotionActive = array[1] == "1";
-					HasTrinketProc = array[2] == "1";
-					HasClearcasting = array[3] == "1";
-					ActiveProcsCount = int.Parse(array[4]);
-					SnapshotScore = float.Parse(array[5]);
-				}
-			}
-		}
-	}
+    private struct ProcState
+    {
+        public bool HasBloodlust;
+        public bool HasPotionActive;
+        public bool HasTrinketProc;
+        public bool HasClearcasting;
+        public bool HasElementalMastery;
+        public bool Has4T10;
+        public bool HasRacial;
+        public bool HasEngGloves;
+        public int ActiveProcsCount;
+        public float SnapshotScore;
+        
+        public void Update()
+        {
+            HasBloodlust = false;
+            HasPotionActive = false;
+            HasTrinketProc = false;
+            HasClearcasting = false;
+            HasElementalMastery = false;
+            Has4T10 = false;
+            HasRacial = false;
+            HasEngGloves = false;
+            ActiveProcsCount = 0;
+            SnapshotScore = 0f;
+            
+            uint[] trinkets = new uint[] { 59077, 64713, 60492, 60494, 71570, 71572, 72416, 75466, 65006, 65011, 64712, 64713, 59626, 67669, 67671 };
+            
+            List<wManager.Wow.Class.Aura> auras = wManager.Wow.Helpers.BuffManager.GetAuras(((wManager.Wow.ObjectManager.WoWObject)wManager.Wow.ObjectManager.ObjectManager.Me).GetBaseAddress);
+            foreach (wManager.Wow.Class.Aura a in auras)
+            {
+                uint id = a.SpellId;
+                if (id == 2825 || id == 32182) { HasBloodlust = true; SnapshotScore += 500f; ActiveProcsCount++; }
+                else if (id == 53908 || id == 53909) { HasPotionActive = true; SnapshotScore += 200f; ActiveProcsCount++; }
+                else if (id == 16246) { HasClearcasting = true; }
+                else if (id == 16166 || id == 64701) { HasElementalMastery = true; SnapshotScore += 300f; ActiveProcsCount++; }
+                else if (id == 70808) { Has4T10 = true; SnapshotScore += 400f; ActiveProcsCount++; }
+                else if (id == 20572 || id == 33697 || id == 33702 || id == 26297) { HasRacial = true; SnapshotScore += 200f; ActiveProcsCount++; }
+                else if (id == 54758) { HasEngGloves = true; SnapshotScore += 200f; ActiveProcsCount++; }
+                else if (System.Linq.Enumerable.Contains(trinkets, id)) { HasTrinketProc = true; SnapshotScore += 300f; ActiveProcsCount++; }
+            }
+        }
+    }
+
+
 
 	private struct HealthSample
 	{
@@ -2240,8 +2253,18 @@ public class Main : ICustomClass
             }
         }
     }
+    private ProcState _procState;
+    private long _lastProcHash = -1;
     private void FSM_Tick()
     {
+        _procState.Update();
+
+        long currentProcHash = (long)_procState.SnapshotScore + (_procState.ActiveProcsCount * 10000) + (_procState.HasBloodlust ? 100000 : 0) + (_procState.HasElementalMastery ? 200000 : 0) + (_procState.Has4T10 ? 400000 : 0) + (_procState.HasTrinketProc ? 800000 : 0) + (_procState.HasRacial ? 1600000 : 0) + (_procState.HasEngGloves ? 3200000 : 0);
+        if (_lastProcHash != currentProcHash)
+        {
+            FTLine("[PROC SNAPSHOT] FSMTick=" + _fsmTickId + " SCORE=" + _procState.SnapshotScore + " BL=" + _procState.HasBloodlust + " EM=" + _procState.HasElementalMastery + " T10=" + _procState.Has4T10 + " TRINKET=" + _procState.HasTrinketProc + " RACIAL=" + _procState.HasRacial + " GLOVES=" + _procState.HasEngGloves + " COUNT=" + _procState.ActiveProcsCount);
+            _lastProcHash = currentProcHash;
+        }
         _fsmTickId++;
         _policyValid = false;
         long traceId = _traceTick + 1;
@@ -3743,7 +3766,7 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
         // ---------------------------------------------------------
         // OFF-GCD BURST COORDINATOR (ATOMIC MACRO)
         // ---------------------------------------------------------
-        bool bloodlustActive = BuffManager.HaveBuff(((WoWObject)ObjectManager.Me).GetBaseAddress, ResolveSpell("bloodlust")) || BuffManager.HaveBuff(((WoWObject)ObjectManager.Me).GetBaseAddress, ResolveSpell("heroism"));
+        bool bloodlustActive = _procState.HasBloodlust;
 
         bool burstPhase = IsBossLikeTarget(combatTarget) || bloodlustActive;
         HandleOffGcdBurst(c, false, burstPhase);
@@ -3751,13 +3774,12 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
         uint fireEleId = ResolveSpell("fire_elemental_totem");
         if (c.Ele.UseFireElemental && fireEleId != 0 && IsBossLikeTarget(combatTarget) && SpellManager.GetSpellCooldownTimeLeft(fireEleId) <= 0 && !HasExpectedState("FireEle"))
         {
-            ProcState procState = default(ProcState);
-            procState.Update();
-            bool goodSnapshot = procState.SnapshotScore >= 500f || procState.ActiveProcsCount >= 2;
+        // _procState already updated at FSM_Tick start
+            bool goodSnapshot = _procState.SnapshotScore >= 500f || _procState.ActiveProcsCount >= 2;
             if (_fireEleWaitStart == 0L) _fireEleWaitStart = Environment.TickCount;
             bool timeOut = Environment.TickCount - _fireEleWaitStart > 15000;
 
-            FTLine("FireEle Snapshot: score=" + procState.SnapshotScore + " count=" + procState.ActiveProcsCount + " wait=" + (Environment.TickCount - _fireEleWaitStart));
+            FTLine("FireEle Snapshot: score=" + _procState.SnapshotScore + " count=" + _procState.ActiveProcsCount + " wait=" + (Environment.TickCount - _fireEleWaitStart));
             if (goodSnapshot || timeOut)
             {
                 FTLine("ACTION CAST FireEle");
