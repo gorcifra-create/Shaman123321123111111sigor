@@ -719,16 +719,17 @@ internal class Main : ICustomClass
 		{
 			"tidal_force",
 			new uint[1] { 55198u }
-		},
-		{    },
-    {
-        "cure_toxins",
-        new uint[2] { 51886u, 526u }
+		},
+		{
+			"cure_toxins",
+			new uint[2] { 51886u, 526u }
+		},
+		{
+			"fire_elemental_totem",
+			new uint[1] { 2894u }
+		}
+	};
 
-			"fire_elemental_totem",
-			new uint[1] { 2894u }
-		}
-	};
 
 	private static PanicState _panicState = PanicState.None;
 
