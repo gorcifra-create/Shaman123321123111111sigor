@@ -3508,28 +3508,20 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
         bool lvbKnown = lvbId > 0;
         float lvbCd = lvbKnown ? SpellManager.GetSpellCooldownTimeLeft(lvbId) : -1f;
 
-        // Lava Surge: proc buff IDs 77762 (rank1). Makes LvB instant & resets CD.
-        // Spell ID 51564 = Lava Surge talent passive; 77762 = actual proc buff
-        bool lavaSurge = lvbKnown && (
-            BuffManager.HaveBuff(((WoWObject)ObjectManager.Me).GetBaseAddress, 77762u) ||
-            BuffManager.HaveBuff(((WoWObject)ObjectManager.Me).GetBaseAddress, 53390u));
-
-        // Lava Burst: instant if Lava Surge proc active, otherwise 2s cast (blocked by moving)
-        bool lvbMovingOk = lavaSurge || !moving; // Proc makes it instant -> castable while moving
-        bool lvbEligible = c.Ele.UseLavaBurst && lvbKnown && lvbCd <= 0 && hasFs && lvbMovingOk;
+        // Lava Burst is a hard cast in 3.3.5a (no Lava Surge proc exists yet)
+        // Can only be cast while standing still
+        bool lvbEligible = c.Ele.UseLavaBurst && lvbKnown && lvbCd <= 0 && hasFs && !moving;
         bool isLvbBlocked = HasExpectedState("LavaBurst_Attempt");
 
         FTLine("[LAVA BURST] Target=" + combatTarget.Name
             + " FS=" + hasFs + " FS_Rem=" + fsDuration.ToString("0.0") + "s"
-            + " LavaSurge=" + lavaSurge
             + " CD=" + lvbCd.ToString("0") + "ms"
-            + " Moving=" + moving + " MovingOk=" + lvbMovingOk
+            + " Moving=" + moving
             + " Eligible=" + lvbEligible + " Blocked=" + isLvbBlocked);
 
         if (lvbEligible && !isLvbBlocked)
         {
-            FTLine("[LAVA BURST CAST] Target=" + combatTarget.Name
-                + " REASON=" + (lavaSurge ? "LavaSurge" : "Normal"));
+            FTLine("[LAVA BURST CAST] Target=" + combatTarget.Name + " REASON=Normal");
             SpellManager.CastSpellByIdLUA(lvbId);
             AddExpectedState("LavaBurst_Attempt", 2500); // 2s cast + net latency
             FTLine("RETURN TRUE: ELE.LavaBurst");
@@ -3538,7 +3530,7 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
         else if (lvbKnown && lvbCd <= 0 && hasFs && !lvbEligible && !isLvbBlocked)
         {
             FTLine("[LAVA BURST BLOCK] Target=" + combatTarget.Name
-                + " REASON=" + (!c.Ele.UseLavaBurst ? "Disabled" : moving ? "Moving(NotInstant)" : !hasFs ? "NoFlameShock" : "Unknown"));
+                + " REASON=" + (!c.Ele.UseLavaBurst ? "Disabled" : moving ? "Moving" : !hasFs ? "NoFlameShock" : "Unknown"));
         }
 
         
