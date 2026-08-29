@@ -3296,70 +3296,7 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
 		return false;
 	}
 
-	private bool State_EleBurstCoordinator(ConfigCache c, WoWUnit target)
-	{
-		bool flag = target.IsElite && target.MaxHealth > ((WoWUnit)ObjectManager.Me).MaxHealth * 3;
-		bool flag2 = BuffManager.HaveBuff(((WoWObject)ObjectManager.Me).GetBaseAddress, ResolveSpell("bloodlust")) || BuffManager.HaveBuff(((WoWObject)ObjectManager.Me).GetBaseAddress, ResolveSpell("heroism"));
-		if (flag || flag2)
-		{
-			if (c.Ele.UseFireElemental)
-			{
-				uint num = ResolveSpell("fire_elemental_totem");
-				if (num != 0 && SpellManager.GetSpellCooldownTimeLeft(num) <= 0)
-				{
-					SpellManager.CastSpellByIdLUA(num);
-					Logging.Write("[ELE BURST] Fire Elemental (" + num + ")");
-					return true;
-				}
-			}
-			if (c.Ele.UseElementalMastery && !HasExpectedState("EM") && ResolveSpell("elemental_mastery") != 0 && SpellManager.GetSpellCooldownTimeLeft(ResolveSpell("elemental_mastery")) <= 0)
-			{
-				SpellManager.CastSpellByIdLUA(ResolveSpell("elemental_mastery"));
-				AddExpectedState("EM", 3000);
-				Logging.Write("[ELE BURST] Elemental Mastery");
-				return true;
-			}
-			if (c.Ele.UseRacial && !HasExpectedState("Racial"))
-			{
-				if (ResolveSpell("blood_fury") != 0 && SpellManager.GetSpellCooldownTimeLeft(ResolveSpell("blood_fury")) <= 0)
-				{
-					SpellManager.CastSpellByIdLUA(ResolveSpell("blood_fury"));
-					AddExpectedState("Racial", 3000);
-					Logging.Write("[ELE BURST] Blood Fury");
-					return true;
-				}
-				if (ResolveSpell("berserking") != 0 && SpellManager.GetSpellCooldownTimeLeft(ResolveSpell("berserking")) <= 0)
-				{
-					SpellManager.CastSpellByIdLUA(ResolveSpell("berserking"));
-					AddExpectedState("Racial", 3000);
-					Logging.Write("[ELE BURST] Berserking");
-					return true;
-				}
-			}
-			if (c.Ele.UseTrinket1 && !HasExpectedState("Trinket1") && Lua.LuaDoString<bool>("local s, d, e = GetInventoryItemCooldown('player', 13); return s == 0;", ""))
-			{
-				Lua.LuaDoString("UseInventoryItem(13);", false);
-				AddExpectedState("Trinket1", 3000);
-				Logging.Write("[ELE BURST] Trinket 1");
-				return true;
-			}
-			if (c.Ele.UseTrinket2 && !HasExpectedState("Trinket2") && Lua.LuaDoString<bool>("local s, d, e = GetInventoryItemCooldown('player', 14); return s == 0;", ""))
-			{
-				Lua.LuaDoString("UseInventoryItem(14);", false);
-				AddExpectedState("Trinket2", 3000);
-				Logging.Write("[ELE BURST] Trinket 2");
-				return true;
-			}
-			if (c.Ele.UseEngGloves && !HasExpectedState("Gloves") && Lua.LuaDoString<bool>("local s, d, e = GetInventoryItemCooldown('player', 10); return s == 0;", ""))
-			{
-				Lua.LuaDoString("UseInventoryItem(10);", false);
-				AddExpectedState("Gloves", 3000);
-				Logging.Write("[ELE BURST] Eng Gloves");
-				return true;
-			}
-		}
-		return false;
-	}
+
 
 	private void State_OffGcdBurst(ConfigCache c, ProcState procs)
 	{
@@ -3445,6 +3382,66 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
 
 
         
+
+        // ---------------------------------------------------------
+        // OFF-GCD BURST COORDINATOR (ATOMIC MACRO)
+        // ---------------------------------------------------------
+        bool bloodlustActive = BuffManager.HaveBuff(((WoWObject)ObjectManager.Me).GetBaseAddress, ResolveSpell("bloodlust")) || BuffManager.HaveBuff(((WoWObject)ObjectManager.Me).GetBaseAddress, ResolveSpell("heroism"));
+        bool burstPhase = IsBossLikeTarget(combatTarget) || bloodlustActive;
+
+        if (burstPhase)
+        {
+            if (c.Ele.UseTrinket1 && !HasExpectedState("Trinket1") && Lua.LuaDoString<bool>("local s, d, e = GetInventoryItemCooldown('player', 13); return s == 0;", ""))
+            {
+                Lua.LuaDoString("UseInventoryItem(13);", false);
+                AddExpectedState("Trinket1", 2000);
+                FTLine("[ELE BURST] Trinket 1 Used");
+            }
+
+            if (c.Ele.UseTrinket2 && !HasExpectedState("Trinket2") && Lua.LuaDoString<bool>("local s, d, e = GetInventoryItemCooldown('player', 14); return s == 0;", ""))
+            {
+                Lua.LuaDoString("UseInventoryItem(14);", false);
+                AddExpectedState("Trinket2", 2000);
+                FTLine("[ELE BURST] Trinket 2 Used");
+            }
+
+            if (c.Ele.UseEngGloves && !HasExpectedState("EngGloves") && Lua.LuaDoString<bool>("local s, d, e = GetInventoryItemCooldown('player', 10); return s == 0;", ""))
+            {
+                Lua.LuaDoString("UseInventoryItem(10);", false);
+                AddExpectedState("EngGloves", 2000);
+                FTLine("[ELE BURST] Gloves Used");
+            }
+
+            if (c.Ele.UseRacial && !HasExpectedState("Racial"))
+            {
+                uint bloodFuryId = ResolveSpell("blood_fury");
+                uint berserkingId = ResolveSpell("berserking");
+                
+                if (bloodFuryId != 0 && SpellManager.GetSpellCooldownTimeLeft(bloodFuryId) <= 0)
+                {
+                    SpellManager.CastSpellByIdLUA(bloodFuryId);
+                    AddExpectedState("Racial", 2000);
+                    FTLine("[ELE BURST] Blood Fury Used");
+                }
+                else if (berserkingId != 0 && SpellManager.GetSpellCooldownTimeLeft(berserkingId) <= 0)
+                {
+                    SpellManager.CastSpellByIdLUA(berserkingId);
+                    AddExpectedState("Racial", 2000);
+                    FTLine("[ELE BURST] Berserking Used");
+                }
+            }
+
+            if (c.Ele.UseElementalMastery && !HasExpectedState("EM"))
+            {
+                uint emId = ResolveSpell("elemental_mastery");
+                if (emId != 0 && SpellManager.GetSpellCooldownTimeLeft(emId) <= 0)
+                {
+                    SpellManager.CastSpellByIdLUA(emId);
+                    AddExpectedState("EM", 2000);
+                    FTLine("[ELE BURST] Elemental Mastery Used");
+                }
+            }
+        }
         // Fire Elemental (Burst Layer)
         uint fireEleId = ResolveSpell("fire_elemental_totem");
         if (c.Ele.UseFireElemental && fireEleId != 0 && IsBossLikeTarget(combatTarget) && SpellManager.GetSpellCooldownTimeLeft(fireEleId) <= 0 && !HasExpectedState("FireEle"))
