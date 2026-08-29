@@ -3393,7 +3393,7 @@ public class Main : ICustomClass
             }
             if t[id] then n = t[id] end
             
-            return n .. '^' .. expr
+            return n .. '^' .. expr .. '^' .. tostring(id)
         ";
         
         string result = Lua.LuaDoString<string>(lua, "");
@@ -3404,6 +3404,11 @@ public class Main : ICustomClass
         {
             currentEnchant = parts[0];
             int.TryParse(parts[1], out remainingMs);
+            if (currentEnchant == "unknown" && parts.Length >= 3 && !HasExpectedState("UnknownEnchantTrace"))
+            {
+                Logging.WriteDebug("Unknown weapon enchant ID: " + parts[2]);
+                AddExpectedState("UnknownEnchantTrace", 60000); // Only trace once per minute
+            }
         }
     }
 private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
@@ -3459,7 +3464,7 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
                 if (currentEnchant != "no_weapon")
                 {
                     bool isMissing = (currentEnchant == "none");
-                    bool isWrong = (!isMissing && currentEnchant != "unknown" && currentEnchant != desiredWeaponEnchant);
+                    bool isWrong = (!isMissing && currentEnchant != desiredWeaponEnchant);
                     bool isExpiring = (!isMissing && !isWrong && remainingMs < 300000); // 5 minutes refresh
                     
                     if (isMissing || isWrong || isExpiring)
