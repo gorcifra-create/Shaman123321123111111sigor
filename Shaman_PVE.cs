@@ -3082,13 +3082,119 @@ internal class Main : ICustomClass
 		return u.IsBoss || (u.Level == 83 && u.MaxHealth > 1000000);
 	}
 
-	private bool State_DBM_Precast(ConfigCache c, bool isResto)
-	{
-		//IL_025c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0263: Expected O, but got Unknown
-		if (string.IsNullOrEmpty(c.Common.DbmBars))
-		{
-			return false;
+	private bool State_DBM_Precast(ConfigCache c, bool isResto)
+		{
+			if (string.IsNullOrEmpty(c.Common.DbmBars))
+			{
+				return false;
+			}
+			
+			bool precastActionTaken = false;
+			string[] array = c.Common.DbmBars.Split(new char[1] { '^' }, StringSplitOptions.RemoveEmptyEntries);
+			
+			float pullRemaining = -1f;
+
+			foreach (string text in array)
+			{
+				string[] array4 = text.Split(':');
+				if (array4.Length != 2)
+				{
+					continue;
+				}
+				string text2 = array4[0].ToLower();
+				float result; 
+				if (!float.TryParse(array4[1], NumberStyles.Any, CultureInfo.InvariantCulture, out result))
+				{
+					continue;
+				}
+				
+				// Defensive stops
+				if ((text2.Contains("meteor") || text2.Contains("defile") || text2.Contains("blistering")) && result <= 2f)
+				{
+					if (ObjectManager.Me.IsCast)
+					{
+						Lua.LuaDoString("SpellStopCasting();", false);
+						Logging.Write("[God-Tier] DANGER DETECTED: StopCasting!");
+					}
+					precastActionTaken = true;
+				}
+				
+				// Pull Timer detection (English, Russian unicode escapes)
+				if (text2.Contains("pull") || text2.Contains("\u043f\u0443\u043b") || text2.Contains("\u0430\u0442\u0430\u043a\u0430"))
+				{
+					pullRemaining = result;
+				}
+			}
+			
+			// --- DBM PULL TIMER PRECAST LOGIC ---
+			if (pullRemaining > 0f && pullRemaining <= 5.0f && !ObjectManager.Me.InCombatFlagOnly)
+			{
+				string bossName = (ObjectManager.Target != null) ? ObjectManager.Target.Name : "None";
+				FTLine("[DBM] FSMTick=" + Environment.TickCount + " BOSS=" + bossName + " ENCOUNTER=Unknown PULL_REMAINING=" + pullRemaining.ToString("0.0") + " ACTIVE=True SOURCE=DbmBars");
+				
+				WoWUnit currentTarget = ObjectManager.Target;
+				
+				if (currentTarget != null && currentTarget.IsValid && currentTarget.IsAlive && currentTarget.IsAttackable)
+				{
+					// Elemental Precast
+					if (!isResto)
+					{
+						// Lightning Bolt Precast at ~2.0s
+						if (pullRemaining <= 2.2f && !ObjectManager.Me.IsCast)
+						{
+							uint lbId = ResolveSpell("lightning_bolt");
+							if (lbId != 0)
+							{
+								FTLine("[PRECAST] FSMTick=" + Environment.TickCount + " ACTION=Cast SPELL=LightningBolt TARGET=" + currentTarget.Name + " PULL_REMAINING=" + pullRemaining.ToString("0.0") + " REASON=PrePull");
+								FastCastById(lbId);
+								return true; // Yield to prevent other actions
+							}
+						}
+					}
+				}
+			}
+			
+			// Resto precast
+			foreach (string text in array)
+			{
+				string[] array4 = text.Split(':');
+				if (array4.Length != 2) continue;
+				string text2 = array4[0].ToLower();
+				float result; if (!float.TryParse(array4[1], NumberStyles.Any, CultureInfo.InvariantCulture, out result)) continue;
+				
+				if (!isResto || (!text2.Contains("bonestorm") && !text2.Contains("infest")) || !(result <= 2.5f) || ObjectManager.Me.IsCast || !c.Resto.UseChainHeal || ResolveSpell("chain_heal") == 0)
+				{
+					continue;
+				}
+				
+				List<WoWUnit> precastTargets = ObjectManager.GetObjectWoWPlayer().Where(delegate(WoWPlayer u)
+				{
+					return ((WoWUnit)u).IsAlive && (int)((WoWUnit)u).Reaction >= 4 && ((WoWObject)u).GetDistance <= 40f && !TraceLine.TraceLineGo(((WoWObject)ObjectManager.Me).Position, ((WoWObject)u).Position, (CGWorldFrameHitFlags)337);
+				}).Cast<WoWUnit>().ToList();
+				
+				Dictionary<ulong, int> clusterCounts = precastTargets.ToDictionary((WoWUnit u) => ((WoWObject)u).Guid, (WoWUnit u) => precastTargets.Count((WoWUnit nearby) => ((WoWObject)nearby).Position.DistanceTo2D(((WoWObject)u).Position) <= 12.5f));
+				
+				WoWUnit val = (from u in precastTargets orderby clusterCounts[((WoWObject)u).Guid] descending, u.HealthPercent select u).FirstOrDefault();
+				if (val == null) { val = (WoWUnit)ObjectManager.Me; }
+				
+				if (val != null)
+				{
+					if (((WoWUnit)ObjectManager.Me).Target != ((WoWObject)val).Guid)
+					{
+						FTLine("[PRECAST] ACTION=SetTarget TARGET=" + val.Name);
+						SafeSetTarget(val);
+						return true;
+					}
+					else
+					{
+						FTLine("[PRECAST] ACTION=Cast SPELL=ChainHeal TARGET=" + val.Name);
+						FastCastById(ResolveSpell("chain_heal"));
+						return true;
+					}
+				}
+			}
+			
+			return precastActionTaken;
 		}
 		string[] array = c.Common.DbmBars.Split(new char[1] { '^' }, StringSplitOptions.RemoveEmptyEntries);
 		string[] array2 = array;
