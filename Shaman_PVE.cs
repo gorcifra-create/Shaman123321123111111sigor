@@ -780,10 +780,18 @@ internal class Main : ICustomClass
         } catch {}
     }
 
-	private void FTResult(string state, bool result)
-	{
-		bool flag = true;
-		Logging.Write("[FULL TRACE]    RESULT " + state + " = " + (result ? "TRUE -> RETURN" : "FALSE -> CONTINUE"));
+	private void FTResult(string state, bool result)
+	{
+		if (result)
+		{
+			FTLine("[RETURN TRACE] FSMTick=" + _fsmTickId + " METHOD=" + state + " RETURN=True REASON=Handled ACTION=Claimed NEXT_EXPECTED=FSM_End");
+			FTLine("[YIELD] FSMTick=" + _fsmTickId + " METHOD=" + state + " REASON=Tick Ownership Claimed NEXT_TICK=" + (_fsmTickId + 1));
+		}
+		else
+		{
+			FTLine("[RETURN TRACE] FSMTick=" + _fsmTickId + " METHOD=" + state + " RETURN=False REASON=Not Handled ACTION=None NEXT_EXPECTED=Next_State");
+			FTLine("[CONTINUE] FSMTick=" + _fsmTickId + " METHOD=" + state + " REASON=Control Passed");
+		}
 	}
 
 	private string FTUnit(WoWUnit u)
@@ -2870,7 +2878,7 @@ internal class Main : ICustomClass
                 {
                     FTLine("[TARGET SWITCH] FSMTick=" + _fsmTickId + " FROM=" + (((WoWUnit)ObjectManager.Me).Target) + " TO=" + combatTarget.Name + " REASON=Wind Shear Target Sync");
                     SafeSetTarget(combatTarget);
-                    return false; // YIELD
+                    return true; // YIELD
                 }
 
                 string spellName;
@@ -2995,7 +3003,7 @@ internal class Main : ICustomClass
                 {
                     FTLine("[TARGET SWITCH] FSMTick=" + _fsmTickId + " FROM=" + (((WoWUnit)ObjectManager.Me).Target) + " TO=" + combatTarget.Name + " REASON=Purge Target Sync");
                     SafeSetTarget(combatTarget);
-                    return false; // YIELD
+                    return true; // YIELD
                 }
 
                 string auraName;
@@ -3729,7 +3737,8 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
 			{
 				FTLine("ACTION CAST Totemic Recall");
 				SpellManager.CastSpellByIdLUA(num);
-				FTLine("RETURN TRUE: Buffs.TotemRecall");
+				FTLine("[RETURN TRACE] FSMTick=" + _fsmTickId + " METHOD=State_BuffsAndTotems RETURN=True REASON=TotemRecall ACTION=Cast NEXT_EXPECTED=FSM_End");
+				FTLine("[YIELD] FSMTick=" + _fsmTickId + " METHOD=State_BuffsAndTotems REASON=Cast NEXT_TICK=" + (_fsmTickId + 1));
 				return true;
 			}
 		}
@@ -3757,7 +3766,8 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
                     
                     SpellManager.CastSpellByIdLUA(shieldSpellId);
                     AddExpectedState("Shield", 1500);
-                    FTLine("RETURN TRUE: Buffs.Shield");
+                    FTLine("[RETURN TRACE] FSMTick=" + _fsmTickId + " METHOD=State_BuffsAndTotems RETURN=True REASON=Shield ACTION=Cast NEXT_EXPECTED=FSM_End");
+			FTLine("[YIELD] FSMTick=" + _fsmTickId + " METHOD=State_BuffsAndTotems REASON=Cast NEXT_TICK=" + (_fsmTickId + 1));
                     return true;
                 }
             }
@@ -3788,7 +3798,8 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
                         Lua.LuaDoString("CastSpellByID(" + wepSpellId + "); if SpellIsTargeting() then UseInventoryItem(16); end", false);
                         Logging.Write("[REACT] Weapon Enchant: " + desiredWeaponEnchant);
                         AddExpectedState("Weapon", 3000); // Prevent double cast same tick
-                        FTLine("RETURN TRUE: Buffs.Weapon");
+                        FTLine("[RETURN TRACE] FSMTick=" + _fsmTickId + " METHOD=State_BuffsAndTotems RETURN=True REASON=Weapon ACTION=Cast NEXT_EXPECTED=FSM_End");
+			FTLine("[YIELD] FSMTick=" + _fsmTickId + " METHOD=State_BuffsAndTotems REASON=Cast NEXT_TICK=" + (_fsmTickId + 1));
                         return true;
                     }
                 }
@@ -3811,7 +3822,8 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
 					ItemsManager.UseItem(41119u);
 					ClickOnTerrain.Pulse(((WoWObject)target).Position);
 					AddExpectedState("SaroniteBomb", 2000);
-					FTLine("RETURN TRUE: Buffs.SaroniteBomb");
+					FTLine("[RETURN TRACE] FSMTick=" + _fsmTickId + " METHOD=State_BuffsAndTotems RETURN=True REASON=Bomb ACTION=Cast NEXT_EXPECTED=FSM_End");
+			FTLine("[YIELD] FSMTick=" + _fsmTickId + " METHOD=State_BuffsAndTotems REASON=Cast NEXT_TICK=" + (_fsmTickId + 1));
 					return true;
 				}
 			}
@@ -3860,14 +3872,16 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
 	private void State_CoreRotation_Ele(ConfigCache c)
     {
         FT("[ELE FULL] State_CoreRotation_Ele");
-        if (ObjectManager.Me.IsCast) { FTLine("RETURN: IS CASTING"); return; }
+        if (ObjectManager.Me.IsCast) { FTLine("[RETURN TRACE] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Ele RETURN=Void REASON=IsCasting ACTION=Yield NEXT_EXPECTED=FSM_End");
+			FTLine("[YIELD] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Ele REASON=Casting NEXT_TICK=" + (_fsmTickId + 1)); return; }
         
         WoWUnit currentTarget = ObjectManager.Target;
         WoWUnit combatTarget = GetCombatTarget(30f);
         
         if (combatTarget == null)
         {
-            FTLine("RETURN: NO TARGET");
+            FTLine("[RETURN TRACE] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Ele RETURN=Void REASON=NoTarget ACTION=None NEXT_EXPECTED=FSM_End");
+			FTLine("[YIELD] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Ele REASON=NoTarget NEXT_TICK=" + (_fsmTickId + 1));
             return;
         }
         
@@ -3875,7 +3889,8 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
         {
             FTLine("[TARGET SWITCH] FSMTick=" + _fsmTickId + " FROM=" + (currentTarget != null ? currentTarget.Name : "null") + " TO=" + combatTarget.Name + " REASON=Fallback Synchronization");
             SafeSetTarget(combatTarget);
-            FTLine("RETURN: Target Sync");
+            FTLine("[RETURN TRACE] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Ele RETURN=Void REASON=TargetSync ACTION=Write NEXT_EXPECTED=FSM_End");
+			FTLine("[YIELD] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Ele REASON=TargetSync NEXT_TICK=" + (_fsmTickId + 1));
             return;
         }
         
@@ -3889,7 +3904,8 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
             if (lhwId != 0 && SpellManager.GetSpellCooldownTimeLeft(lhwId) <= 0)
             {
                 SpellManager.CastSpellByIdLUA(lhwId);
-                FTLine("RETURN: EMERGENCY HEAL");
+                FTLine("[RETURN TRACE] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Ele RETURN=Void REASON=EmergencyHeal ACTION=Cast NEXT_EXPECTED=FSM_End");
+			FTLine("[YIELD] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Ele REASON=Cast NEXT_TICK=" + (_fsmTickId + 1));
                 return;
             }
         }
@@ -3901,7 +3917,8 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
             if (cureId != 0 && SpellManager.GetSpellCooldownTimeLeft(cureId) <= 0)
             {
                 SpellManager.CastSpellByIdLUA(cureId);
-                FTLine("RETURN: CURE TOXINS");
+                FTLine("[RETURN TRACE] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Ele RETURN=Void REASON=CureToxins ACTION=Cast NEXT_EXPECTED=FSM_End");
+			FTLine("[YIELD] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Ele REASON=Cast NEXT_TICK=" + (_fsmTickId + 1));
                 return;
             }
         }
@@ -3932,7 +3949,8 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
                 SpellManager.CastSpellByIdLUA(fireEleId);
                 AddExpectedState("FireEle", 2000);
                 _fireEleWaitStart = 0L;
-                FTLine("RETURN TRUE: ELE.FireEle");
+                FTLine("[RETURN TRACE] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Ele RETURN=Void REASON=FireEle ACTION=Cast NEXT_EXPECTED=FSM_End");
+			FTLine("[YIELD] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Ele REASON=Cast NEXT_TICK=" + (_fsmTickId + 1));
                 return;
             }
             else
@@ -3960,7 +3978,8 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
             FTLine("[THUNDERSTORM MANA OVERRIDE] MANA=" + ObjectManager.Me.ManaPercentage + " THRESHOLD=" + c.Ele.ThunderstormMana + " CD=" + tsPri0Cd.ToString("0") + "ms");
             SpellManager.CastSpellByIdLUA(tsPri0Id);
             AddExpectedState("Thunderstorm_Attempt", 1500); // Instant cast, GCD + latency
-            FTLine("RETURN TRUE: ELE.Thunderstorm (Mana)");
+            FTLine("[RETURN TRACE] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Ele RETURN=Void REASON=ThunderstormMana ACTION=Cast NEXT_EXPECTED=FSM_End");
+			FTLine("[YIELD] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Ele REASON=Cast NEXT_TICK=" + (_fsmTickId + 1));
             return;
         }
 
@@ -3996,7 +4015,8 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
 			FTLine("[FLAME SHOCK CAST] Target=" + combatTarget.Name + " REASON=" + (!hasFs ? "Missing" : "Refresh Window"));
 			SpellManager.CastSpellByIdLUA(fsId);
 			AddExpectedState("FlameShock_Attempt", 1500); // 1.5s Anti-Spam protection
-			FTLine("RETURN TRUE: ELE.FlameShock");
+			FTLine("[RETURN TRACE] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Ele RETURN=Void REASON=FlameShock ACTION=Cast NEXT_EXPECTED=FSM_End");
+			FTLine("[YIELD] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Ele REASON=Cast NEXT_TICK=" + (_fsmTickId + 1));
 			return;
 		}
         
@@ -4021,7 +4041,8 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
             FTLine("[LAVA BURST CAST] Target=" + combatTarget.Name + " REASON=Normal");
             SpellManager.CastSpellByIdLUA(lvbId);
             AddExpectedState("LavaBurst_Attempt", 2500); // 2s cast + net latency
-            FTLine("RETURN TRUE: ELE.LavaBurst");
+            FTLine("[RETURN TRACE] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Ele RETURN=Void REASON=LavaBurst ACTION=Cast NEXT_EXPECTED=FSM_End");
+			FTLine("[YIELD] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Ele REASON=Cast NEXT_TICK=" + (_fsmTickId + 1));
             return;
         }
         else if (lvbKnown && lvbCd <= 0 && hasFs && !lvbEligible && !isLvbBlocked)
@@ -4110,7 +4131,8 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
             FTLine("[FIRE NOVA CAST] FIRE_TOTEM=" + fireTotemName + " ENEMY_COUNT=" + fnTotalTargets + " REASON=AOE");
             SpellManager.CastSpellByIdLUA(fnId);
             AddExpectedState("FireNova_Attempt", 1500); // Instant cast, GCD + latency
-            FTLine("RETURN TRUE: ELE.FireNova");
+            FTLine("[RETURN TRACE] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Ele RETURN=Void REASON=FireNova ACTION=Cast NEXT_EXPECTED=FSM_End");
+			FTLine("[YIELD] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Ele REASON=Cast NEXT_TICK=" + (_fsmTickId + 1));
             return;
         }
         else if (fnKnown && fnTotalTargets >= aoeThreshold && fnCd <= 0 && !isFnBlocked)
@@ -4143,7 +4165,8 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
                 + " REASON=" + (clIsAoeEligible ? "AOE" : "ST"));
             SpellManager.CastSpellByIdLUA(clId);
             AddExpectedState("ChainLightning_Attempt", 2500); // 2s cast base + latency
-            FTLine("RETURN TRUE: ELE.ChainLightning");
+            FTLine("[RETURN TRACE] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Ele RETURN=Void REASON=ChainLightning ACTION=Cast NEXT_EXPECTED=FSM_End");
+			FTLine("[YIELD] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Ele REASON=Cast NEXT_TICK=" + (_fsmTickId + 1));
             return;
         }
         else if (clKnown && clCd <= 0 && !clEligible && !isClBlocked)
@@ -4183,7 +4206,8 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
             FTLine("[THUNDERSTORM CAST] ENEMY_COUNT=" + tsTotalTargets + " MANA=" + ObjectManager.Me.ManaPercentage + " REASON=" + tsReason);
             SpellManager.CastSpellByIdLUA(tsId);
             AddExpectedState("Thunderstorm_Attempt", 1500); // Instant cast, GCD + latency
-            FTLine("RETURN TRUE: ELE.Thunderstorm");
+            FTLine("[RETURN TRACE] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Ele RETURN=Void REASON=Thunderstorm ACTION=Cast NEXT_EXPECTED=FSM_End");
+			FTLine("[YIELD] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Ele REASON=Cast NEXT_TICK=" + (_fsmTickId + 1));
             return;
         }
         else if (tsKnown && tsAoeEligible && tsCd <= 0 && !tsBlocked)
@@ -4206,7 +4230,8 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
             FTLine("[LIGHTNING BOLT CAST] Target=" + combatTarget.Name + " REASON=Filler");
             SpellManager.CastSpellByIdLUA(lbId);
             AddExpectedState("LightningBolt_Attempt", 2500); // 2.5s base (reduced by talents/haste) + latency
-            FTLine("RETURN TRUE: ELE.LightningBolt");
+            FTLine("[RETURN TRACE] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Ele RETURN=Void REASON=LightningBolt ACTION=Cast NEXT_EXPECTED=FSM_End");
+			FTLine("[YIELD] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Ele REASON=Cast NEXT_TICK=" + (_fsmTickId + 1));
             return;
         }
         else if (lbKnown && !lbEligible && !isLbBlocked)
@@ -4229,7 +4254,8 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
                 FTLine("[EARTH SHOCK CAST] TARGET=" + combatTarget.Name + " MAELSTROM=NONE REASON=Movement");
                 SpellManager.CastSpellByIdLUA(esId);
                 AddExpectedState("EarthShock", 1500);
-                FTLine("RETURN TRUE: ELE.EarthShock");
+                FTLine("[RETURN TRACE] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Ele RETURN=Void REASON=EarthShock ACTION=Cast NEXT_EXPECTED=FSM_End");
+			FTLine("[YIELD] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Ele REASON=Cast NEXT_TICK=" + (_fsmTickId + 1));
                 return;
             }
             else
@@ -4254,7 +4280,8 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
                 FTLine("[FROST SHOCK CAST] TARGET=" + combatTarget.Name + " REASON=Movement");
                 SpellManager.CastSpellByIdLUA(frsId);
                 AddExpectedState("FrostShock", 1500);
-                FTLine("RETURN TRUE: ELE.FrostShock");
+                FTLine("[RETURN TRACE] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Ele RETURN=Void REASON=FrostShock ACTION=Cast NEXT_EXPECTED=FSM_End");
+			FTLine("[YIELD] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Ele REASON=Cast NEXT_TICK=" + (_fsmTickId + 1));
                 return;
             }
             else
@@ -4288,6 +4315,8 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
 		list = list.Distinct().ToList();
 		if (list.Count == 0)
 		{
+            FTLine("[RETURN TRACE] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Resto RETURN=False REASON=NoAction ACTION=None NEXT_EXPECTED=Next_State");
+            FTLine("[CONTINUE] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Resto REASON=Control_Passed");
 			return false;
 		}
 		TrackHealth(list);
@@ -4323,16 +4352,22 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
 				if (((WoWUnit)ObjectManager.Me).Target != ((WoWObject)tank).Guid)
 				{
 					SafeSetTarget(tank);
+            FTLine("[RETURN TRACE] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Resto RETURN=True REASON=TargetSync ACTION=Handled NEXT_EXPECTED=FSM_End");
+            FTLine("[YIELD] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Resto REASON=TargetSync NEXT_TICK=" + (_fsmTickId + 1));
 					return true;
 				}
 				SpellManager.CastSpellByIdLUA(ResolveSpell("earth_shield"));
 				AddExpectedState("EarthShield", 2000);
+            FTLine("[RETURN TRACE] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Resto RETURN=True REASON=EarthShield ACTION=Handled NEXT_EXPECTED=FSM_End");
+            FTLine("[YIELD] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Resto REASON=EarthShield NEXT_TICK=" + (_fsmTickId + 1));
 				return true;
 			}
 		}
 		bool flag2 = c.Resto.ValithriaEnable && list.Any((WoWUnit x) => ((WoWObject)x).Entry == 36789 && x.HealthPercent < 100.0);
 		if (list.Count == 0)
 		{
+            FTLine("[RETURN TRACE] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Resto RETURN=False REASON=NoAction ACTION=None NEXT_EXPECTED=Next_State");
+            FTLine("[CONTINUE] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Resto REASON=Control_Passed");
 			return false;
 		}
 
@@ -4355,6 +4390,8 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
 					if (((WoWUnit)ObjectManager.Me).Target != ((WoWObject)val3).Guid)
 					{
 						SafeSetTarget(val3);
+            FTLine("[RETURN TRACE] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Resto RETURN=True REASON=TargetSync ACTION=Handled NEXT_EXPECTED=FSM_End");
+            FTLine("[YIELD] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Resto REASON=TargetSync NEXT_TICK=" + (_fsmTickId + 1));
 						return true;
 					}
 					if (_panicState == PanicState.CastNS)
@@ -4365,6 +4402,8 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
 							{
 								SpellManager.CastSpellByIdLUA(ResolveSpell("natures_swiftness"));
 							}
+            FTLine("[RETURN TRACE] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Resto RETURN=True REASON=NaturesSwiftness ACTION=Handled NEXT_EXPECTED=FSM_End");
+            FTLine("[YIELD] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Resto REASON=NaturesSwiftness NEXT_TICK=" + (_fsmTickId + 1));
 							return true;
 						}
 						_panicState = PanicState.CastTidal;
@@ -4377,6 +4416,8 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
 							{
 								SpellManager.CastSpellByIdLUA(ResolveSpell("tidal_force"));
 							}
+            FTLine("[RETURN TRACE] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Resto RETURN=True REASON=TidalForce ACTION=Handled NEXT_EXPECTED=FSM_End");
+            FTLine("[YIELD] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Resto REASON=TidalForce NEXT_TICK=" + (_fsmTickId + 1));
 							return true;
 						}
 						_panicState = PanicState.CastHW;
@@ -4388,6 +4429,8 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
 							SpellManager.CastSpellByIdLUA(ResolveSpell("healing_wave"));
 						}
 						_panicState = PanicState.None;
+            FTLine("[RETURN TRACE] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Resto RETURN=True REASON=PanicResolved ACTION=Handled NEXT_EXPECTED=FSM_End");
+            FTLine("[YIELD] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Resto REASON=PanicResolved NEXT_TICK=" + (_fsmTickId + 1));
 						return true;
 					}
 				}
@@ -4413,8 +4456,12 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
 				if (((WoWUnit)ObjectManager.Me).Target != ((WoWObject)val4).Guid)
 				{
 					SafeSetTarget(val4);
+            FTLine("[RETURN TRACE] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Resto RETURN=True REASON=TargetSync ACTION=Handled NEXT_EXPECTED=FSM_End");
+            FTLine("[YIELD] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Resto REASON=TargetSync NEXT_TICK=" + (_fsmTickId + 1));
 					return true;
 				}
+            FTLine("[RETURN TRACE] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Resto RETURN=True REASON=Unknown ACTION=Handled NEXT_EXPECTED=FSM_End");
+            FTLine("[YIELD] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Resto REASON=Unknown NEXT_TICK=" + (_fsmTickId + 1));
 				return true;
 			}
 		}
@@ -4426,9 +4473,13 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
 				if (((WoWUnit)ObjectManager.Me).Target != ((WoWObject)val5).Guid)
 				{
 					SafeSetTarget(val5);
+            FTLine("[RETURN TRACE] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Resto RETURN=True REASON=TargetSync ACTION=Handled NEXT_EXPECTED=FSM_End");
+            FTLine("[YIELD] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Resto REASON=TargetSync NEXT_TICK=" + (_fsmTickId + 1));
 					return true;
 				}
 				SpellManager.CastSpellByIdLUA(ResolveSpell("healing_wave"));
+            FTLine("[RETURN TRACE] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Resto RETURN=True REASON=HealingWave ACTION=Handled NEXT_EXPECTED=FSM_End");
+            FTLine("[YIELD] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Resto REASON=HealingWave NEXT_TICK=" + (_fsmTickId + 1));
 				return true;
 			}
 		}
@@ -4530,6 +4581,8 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
 			if (((WoWUnit)ObjectManager.Me).Target != ((WoWObject)val6).Guid)
 			{
 				SafeSetTarget(val6);
+            FTLine("[RETURN TRACE] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Resto RETURN=True REASON=TargetSync ACTION=Handled NEXT_EXPECTED=FSM_End");
+            FTLine("[YIELD] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Resto REASON=TargetSync NEXT_TICK=" + (_fsmTickId + 1));
 				return true;
 			}
 			SpellManager.CastSpellByIdLUA(num6);
@@ -4537,8 +4590,12 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
 			{
 				AddExpectedState("Riptide" + ((WoWObject)val6).Guid, 1000);
 			}
+            FTLine("[RETURN TRACE] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Resto RETURN=True REASON=Unknown ACTION=Handled NEXT_EXPECTED=FSM_End");
+            FTLine("[YIELD] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Resto REASON=Unknown NEXT_TICK=" + (_fsmTickId + 1));
 			return true;
 		}
+            FTLine("[RETURN TRACE] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Resto RETURN=False REASON=NoAction ACTION=None NEXT_EXPECTED=Next_State");
+            FTLine("[CONTINUE] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Resto REASON=Control_Passed");
 		return false;
 	}
 }
