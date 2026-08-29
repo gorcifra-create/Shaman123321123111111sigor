@@ -3577,19 +3577,32 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
             }
         }
         
-        // Movement / Filler
-        if (!moving)
+        // Lightning Bolt (Filler)
+        uint lbId = ResolveSpell("lightning_bolt");
+        bool lbKnown = lbId > 0;
+        bool lbEligible = c.Ele.UseLightningBolt && lbKnown && !moving;
+        bool isLbBlocked = HasExpectedState("LightningBolt_Attempt");
+
+        FTLine("[LIGHTNING BOLT] Target=" + combatTarget.Name
+            + " Moving=" + moving
+            + " Eligible=" + lbEligible + " Blocked=" + isLbBlocked);
+
+        if (lbEligible && !isLbBlocked)
         {
-            uint lbId = ResolveSpell("lightning_bolt");
-            if (c.Ele.UseLightningBolt && lbId > 0)
-            {
-                FTLine("ACTION CAST Lightning Bolt");
-                SpellManager.CastSpellByIdLUA(lbId);
-                FTLine("RETURN TRUE: ELE.LightningBolt");
-                return;
-            }
+            FTLine("[LIGHTNING BOLT CAST] Target=" + combatTarget.Name + " REASON=Filler");
+            SpellManager.CastSpellByIdLUA(lbId);
+            AddExpectedState("LightningBolt_Attempt", 2500); // 2.5s base (reduced by talents/haste) + latency
+            FTLine("RETURN TRUE: ELE.LightningBolt");
+            return;
         }
-        else
+        else if (lbKnown && !lbEligible && !isLbBlocked)
+        {
+            FTLine("[LIGHTNING BOLT BLOCK] Target=" + combatTarget.Name
+                + " REASON=" + (!c.Ele.UseLightningBolt ? "Disabled" : moving ? "Moving" : "Unknown"));
+        }
+
+        // Earth Shock (Movement Fallback)
+        if (moving)
         {
             uint esId = ResolveSpell("earth_shock");
             if (esId > 0 && SpellManager.GetSpellCooldownTimeLeft(esId) <= 0)
