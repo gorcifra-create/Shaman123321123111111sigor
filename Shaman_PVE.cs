@@ -3369,6 +3369,7 @@ public class Main : ICustomClass
     private uint _nextTotemVerifyTime = 0;
     private bool _wasMoving = false;
 
+
     private void GetMainHandEnchantState(out string currentEnchant, out int remainingMs)
     {
         currentEnchant = "none";
@@ -3378,37 +3379,45 @@ public class Main : ICustomClass
             local hasItem = GetInventoryItemID('player', 16)
             if not hasItem then return 'no_weapon^0' end
             
-            local h, expr, _, id = GetWeaponEnchantInfo()
+            local h, expr = GetWeaponEnchantInfo()
             if not h then return 'none^0' end
             
-            expr = expr or 0
-            local n = 'unknown'
+            WRobotTooltip = WRobotTooltip or CreateFrame('GameTooltip', 'WRobotTooltip', nil, 'GameTooltipTemplate')
+            WRobotTooltip:SetOwner(WorldFrame, 'ANCHOR_NONE')
+            WRobotTooltip:ClearLines()
+            WRobotTooltip:SetInventoryItem('player', 16)
             
-            local t = {
-                [283]='windfury_weapon', [284]='windfury_weapon', [525]='windfury_weapon', [1669]='windfury_weapon', [2636]='windfury_weapon', [3785]='windfury_weapon', [3786]='windfury_weapon', [3787]='windfury_weapon',
-                [3]='flametongue_weapon', [4]='flametongue_weapon', [5]='flametongue_weapon', [523]='flametongue_weapon', [1665]='flametongue_weapon', [1666]='flametongue_weapon', [2634]='flametongue_weapon', [3779]='flametongue_weapon', [3780]='flametongue_weapon', [3781]='flametongue_weapon',
-                [3345]='earthliving_weapon', [3346]='earthliving_weapon', [3347]='earthliving_weapon', [3348]='earthliving_weapon', [3349]='earthliving_weapon', [3350]='earthliving_weapon',
-                [2]='frostbrand_weapon', [12]='frostbrand_weapon', [524]='frostbrand_weapon', [1667]='frostbrand_weapon', [1668]='frostbrand_weapon', [2635]='frostbrand_weapon', [3782]='frostbrand_weapon', [3783]='frostbrand_weapon', [3784]='frostbrand_weapon',
-                [1]='rockbiter_weapon', [6]='rockbiter_weapon', [29]='rockbiter_weapon', [503]='rockbiter_weapon', [1663]='rockbiter_weapon', [1664]='rockbiter_weapon', [2632]='rockbiter_weapon', [2633]='rockbiter_weapon', [3018]='rockbiter_weapon'
-            }
-            if t[id] then n = t[id] end
+            local buffName = 'unknown'
+            for i=1, WRobotTooltip:NumLines() do
+                local text = _G['WRobotTooltipTextLeft'..i]:GetText()
+                if text then
+                    if string.find(text, 'Windfury') or string.find(text, 'Неистовств') or string.find(text, 'неистовств') then buffName = 'windfury_weapon'; break; end
+                    if string.find(text, 'Flametongue') or string.find(text, 'Язык пламени') or string.find(text, 'язык пламени') then buffName = 'flametongue_weapon'; break; end
+                    if string.find(text, 'Earthliving') or string.find(text, 'Жизнь Земли') or string.find(text, 'жизнь земли') then buffName = 'earthliving_weapon'; break; end
+                    if string.find(text, 'Frostbrand') or string.find(text, 'Ледяное клеймо') or string.find(text, 'ледяное клеймо') or string.find(text, 'Ледяного клейма') then buffName = 'frostbrand_weapon'; break; end
+                    if string.find(text, 'Rockbiter') or string.find(text, 'Камнедробитель') or string.find(text, 'камнедробитель') then buffName = 'rockbiter_weapon'; break; end
+                end
+            end
             
-            return n .. '^' .. expr .. '^' .. tostring(id)
+            return buffName .. '^' .. (expr or 0)
         ";
         
         string result = Lua.LuaDoString<string>(lua, "");
         if (string.IsNullOrEmpty(result)) return;
         
         string[] parts = result.Split('^');
-        if (parts.Length == 2)
+        if (parts.Length >= 2)
         {
             currentEnchant = parts[0];
             int.TryParse(parts[1], out remainingMs);
-            if (currentEnchant == "unknown" && parts.Length >= 3 && !HasExpectedState("UnknownEnchantTrace"))
+            
+            if (currentEnchant == "unknown" && !HasExpectedState("UnknownEnchantTrace"))
             {
-                Logging.WriteDebug("Unknown weapon enchant ID: " + parts[2]);
-                AddExpectedState("UnknownEnchantTrace", 60000); // Only trace once per minute
+                FTLine("[UNKNOWN ENCHANT] Tooltip scan failed to match any shaman enchant.");
+                AddExpectedState("UnknownEnchantTrace", 60000);
             }
+        }
+    }
         }
     }
 private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
