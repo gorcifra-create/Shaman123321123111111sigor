@@ -3473,6 +3473,26 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
             _fireEleWaitStart = 0L;
         }
         
+        // ---------------------------------------------------------
+        // Priority 0: Thunderstorm (MANA RECOVERY OVERRIDE)
+        // ---------------------------------------------------------
+        uint tsPri0Id = ResolveSpell("thunderstorm");
+        bool tsPri0Known = tsPri0Id > 0;
+        float tsPri0Cd = tsPri0Known ? SpellManager.GetSpellCooldownTimeLeft(tsPri0Id) : -1f;
+        bool tsPri0Blocked = HasExpectedState("Thunderstorm_Attempt");
+
+        bool tsPri0ManaEligible = c.Ele.ThunderstormMana > 0 && ObjectManager.Me.ManaPercentage <= c.Ele.ThunderstormMana;
+        
+        if (tsPri0Known && c.Ele.UseThunderstorm && tsPri0ManaEligible && tsPri0Cd <= 0 && !tsPri0Blocked)
+        {
+            FTLine("[THUNDERSTORM MANA OVERRIDE] MANA=" + ObjectManager.Me.ManaPercentage + " THRESHOLD=" + c.Ele.ThunderstormMana + " CD=" + tsPri0Cd.ToString("0") + "ms");
+            SpellManager.CastSpellByIdLUA(tsPri0Id);
+            AddExpectedState("Thunderstorm_Attempt", 1500); // Instant cast, GCD + latency
+            FTLine("RETURN TRUE: ELE.Thunderstorm (Mana)");
+            return;
+        }
+
+        // ---------------------------------------------------------
 		// Flame Shock
 		uint fsId = ResolveSpell("flame_shock");
 		bool fsKnown = fsId > 0;
@@ -3664,21 +3684,40 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
         }
 
         // ---------------------------------------------------------
-        // Priority 5: Thunderstorm (AOE)
         // ---------------------------------------------------------
-        if (tsTotalTargets >= aoeThreshold)
+        // Priority 5: Thunderstorm (AOE / MANA)
+        // ---------------------------------------------------------
+        uint tsId = ResolveSpell("thunderstorm");
+        bool tsKnown = tsId > 0;
+        float tsCd = tsKnown ? SpellManager.GetSpellCooldownTimeLeft(tsId) : -1f;
+
+        bool tsBlocked = HasExpectedState("Thunderstorm_Attempt");
+        
+        bool tsAoeEligible = c.Ele.ThunderstormAoe && (tsTotalTargets >= aoeThreshold);
+        
+        bool tsEligible = c.Ele.UseThunderstorm && tsKnown && tsCd <= 0 && !tsBlocked && (tsAoeEligible);
+
+        if (tsKnown || tsAoeEligible)
         {
-            uint tsId = ResolveSpell("thunderstorm");
-            if (c.Ele.UseThunderstorm && tsId > 0 && SpellManager.GetSpellCooldownTimeLeft(tsId) <= 0)
-            {
-                FTLine("ACTION CAST Thunderstorm (AoE)");
-                SpellManager.CastSpellByIdLUA(tsId);
-                FTLine("RETURN TRUE: ELE.Thunderstorm");
-                return;
-            }
+            FTLine("[THUNDERSTORM] PLAYER_ENEMIES=" + tsTotalTargets + " THRESHOLD=" + aoeThreshold
+                + " MANA=" + ObjectManager.Me.ManaPercentage + " MANA_THRESHOLD=" + c.Ele.ThunderstormMana
+                + " AOE_FLAG=" + c.Ele.ThunderstormAoe + " CD=" + tsCd.ToString("0") + "ms"
+                + " Eligible=" + tsEligible + " Blocked=" + tsBlocked);
         }
 
-        // ---------------------------------------------------------
+        if (tsEligible)
+        {
+            string tsReason = "AOE";
+            FTLine("[THUNDERSTORM CAST] ENEMY_COUNT=" + tsTotalTargets + " MANA=" + ObjectManager.Me.ManaPercentage + " REASON=" + tsReason);
+            SpellManager.CastSpellByIdLUA(tsId);
+            AddExpectedState("Thunderstorm_Attempt", 1500); // Instant cast, GCD + latency
+            FTLine("RETURN TRUE: ELE.Thunderstorm");
+            return;
+        }
+        else if (tsKnown && tsAoeEligible && tsCd <= 0 && !tsBlocked)
+        {
+            FTLine("[THUNDERSTORM BLOCK] REASON=DisabledByConfig");
+        }
         // Priority 6: Lightning Bolt (Filler)
         // ---------------------------------------------------------
         uint lbId = ResolveSpell("lightning_bolt");
