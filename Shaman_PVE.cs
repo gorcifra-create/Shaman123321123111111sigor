@@ -3891,7 +3891,7 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
     {
         FT("[ELE FULL] State_CoreRotation_Ele");
         // if (ObjectManager.Me.IsCast) removed for MACHINE GUN
-			FTLine("[YIELD] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Ele REASON=Casting NEXT_TICK=" + (_fsmTickId + 1)); return; }
+			FTLine("[YIELD] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Ele REASON=Casting NEXT_TICK=" + (_fsmTickId + 1)); // return; } removed for MACHINE GUN
         
         WoWUnit currentTarget = ObjectManager.Target;
         WoWUnit combatTarget = GetCombatTarget(30f);
