@@ -2505,6 +2505,62 @@ public class Main : ICustomClass
 	}
 
 
+
+    private bool IsTargetPurgeable(out string auraName, out string auraType)
+    {
+        auraName = "";
+        auraType = "";
+        
+        string lua = @"
+            local bestName = ''
+            local bestType = ''
+            
+            local whitelist = {
+                ['Power Word: Shield'] = true,
+                ['Ice Barrier'] = true,
+                ['Bloodlust'] = true,
+                ['Heroism'] = true,
+                ['Rejuvenation'] = true,
+                ['Regrowth'] = true,
+                ['Divine Favor'] = true,
+                ['Icy Veins'] = true
+            }
+
+            for i=1,40 do
+                local name, _, _, _, buffType = UnitBuff('target', i)
+                if not name then break end
+                
+                if buffType == 'Magic' then
+                    if whitelist[name] then
+                        return name .. '^' .. buffType .. '^1'
+                    end
+                    if bestName == '' then
+                        bestName = name
+                        bestType = buffType
+                    end
+                end
+            end
+            
+            if bestName ~= '' then
+                return bestName .. '^' .. bestType .. '^0'
+            end
+            
+            return 'NONE'
+        ";
+        
+        string result = Lua.LuaDoString<string>(lua, "");
+        if (result == "NONE" || string.IsNullOrEmpty(result)) return false;
+        
+        string[] parts = result.Split('^');
+        if (parts.Length >= 2)
+        {
+            auraName = parts[0];
+            auraType = parts[1];
+            return true;
+        }
+        return false;
+    }
+
     private bool IsTargetInterruptible(out string spellName, out int timeLeftMs, out bool isChannel)
     {
         spellName = "";
@@ -2671,22 +2727,45 @@ public class Main : ICustomClass
 				return true;
 			}
 		}
-		if (c.Common.UsePurge && combatTarget != null && combatTarget.IsAlive && combatTarget.IsAttackable && ((WoWUnit)ObjectManager.Me).ManaPercentage > 30)
-		{
-			if (((WoWUnit)ObjectManager.Me).Target != ((WoWObject)combatTarget).Guid)
-				{
-					FTLine("[TARGET SWITCH] FSMTick=" + _fsmTickId + " FROM=" + (((WoWUnit)ObjectManager.Me).Target) + " TO=" + combatTarget.Name + " REASON=Wind Shear Target Sync");
-					SafeSetTarget(combatTarget);
-					return false;
-				}
-			if (Lua.LuaDoString<bool>("for i=1,40 do local name,_,_,_,type = UnitBuff('target', i); if name and (name == 'Power Word: Shield' or name == 'Ice Barrier' or name == 'Bloodlust' or name == 'Heroism' or name == 'Rejuvenation' or name == 'Regrowth' or (type == 'Magic' and UnitMana('player')/UnitManaMax('player') > 0.5)) then return true end end return false;", "") && ResolveSpell("purge") != 0 && SpellManager.GetSpellCooldownTimeLeft(ResolveSpell("purge")) <= 0 && !HasExpectedState("Purge" + ((WoWObject)combatTarget).Guid))
-			{
-				SpellManager.CastSpellByIdLUA(ResolveSpell("purge"));
-				AddExpectedState("Purge" + ((WoWObject)combatTarget).Guid, 1500);
-				return true;
-			}
-		}
-		return false;
+
+        // Purge
+        if (c.Common.UsePurge && combatTarget != null && ((WoWObject)combatTarget).IsValid && combatTarget.IsAlive && combatTarget.IsAttackable && combatTarget.GetDistance <= 30f && ((WoWUnit)ObjectManager.Me).ManaPercentage > 20)
+        {
+            uint num = ResolveSpell("purge");
+            if (num != 0 && SpellManager.GetSpellCooldownTimeLeft(num) <= 0 && !HasExpectedState("Purge"))
+            {
+                // Target Sync must complete BEFORE checking Lua
+                if (((WoWUnit)ObjectManager.Me).Target != ((WoWObject)combatTarget).Guid)
+                {
+                    FTLine("[TARGET SWITCH] FSMTick=" + _fsmTickId + " FROM=" + (((WoWUnit)ObjectManager.Me).Target) + " TO=" + combatTarget.Name + " REASON=Purge Target Sync");
+                    SafeSetTarget(combatTarget);
+                    return false; // YIELD
+                }
+
+                string auraName;
+                string auraType;
+                
+                bool isPurgeable = IsTargetPurgeable(out auraName, out auraType);
+                
+                FTLine("[PURGE] CANDIDATE=" + combatTarget.Name + " AURA=" + (isPurgeable ? auraName : "None") + " AURA_TYPE=" + (isPurgeable ? auraType : "None") + " DISPELLABLE=" + isPurgeable + " DISTANCE=" + combatTarget.GetDistance.ToString("0.0") + " LOS=True");
+
+                if (isPurgeable)
+                {
+                    FTLine("[PURGE CAST] FSMTick=" + _fsmTickId + " TARGET=" + combatTarget.Name + " AURA=" + auraName + " AURA_TYPE=" + auraType + " REASON=Beneficial Magic");
+                    SpellManager.CastSpellByIdLUA(num);
+                    Logging.Write("[REACT] Purge (" + num + ") on " + auraName);
+                    AddExpectedState("Purge", 1500); // Anti-spam
+                    return true;
+                }
+                else
+                {
+                    FTLine("[PURGE BLOCK] FSMTick=" + _fsmTickId + " REASON=Not Dispellable or Finished");
+                }
+            }
+        }
+        
+        return false;
+
 	}
 
 	private bool IsBossLikeTarget(WoWUnit u)
