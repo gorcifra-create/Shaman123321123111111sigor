@@ -3756,7 +3756,7 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
             bool goodSnapshot = procState.SnapshotScore >= 500f || procState.ActiveProcsCount >= 2;
             if (_fireEleWaitStart == 0L) _fireEleWaitStart = Environment.TickCount;
             bool timeOut = Environment.TickCount - _fireEleWaitStart > 15000;
-            
+
             FTLine("FireEle Snapshot: score=" + procState.SnapshotScore + " count=" + procState.ActiveProcsCount + " wait=" + (Environment.TickCount - _fireEleWaitStart));
             if (goodSnapshot || timeOut)
             {
@@ -3767,14 +3767,16 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
                 FTLine("RETURN TRUE: ELE.FireEle");
                 return;
             }
-            FTLine("REASON=Waiting for better snapshot");
-            return; // Wait for snapshot!
+            else
+            {
+                FTLine("REASON=Waiting for better snapshot");
+                // DO NOT RETURN HERE! Continue rotation to trigger procs!
+            }
         }
         else
         {
             _fireEleWaitStart = 0L;
         }
-        
         // ---------------------------------------------------------
         // Priority 0: Thunderstorm (MANA RECOVERY OVERRIDE)
         // ---------------------------------------------------------
