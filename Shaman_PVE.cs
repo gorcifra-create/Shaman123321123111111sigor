@@ -110,6 +110,94 @@ internal class Main : ICustomClass
 
 
 
+    private struct CombatSnapshot
+    {
+        // Identity
+        public long FSMTick;
+
+        // World
+        public bool InCombat;
+        public bool IsMoving;
+        public bool IsCasting;
+        public bool IsChanneling;
+        public float ManaPercent;
+        public float HealthPercent;
+
+        // Target
+        public bool HasTarget;
+        public bool TargetAlive;
+        public bool TargetAttackable;
+        public ulong TargetGuid;
+        public string TargetName;
+
+        // AOE
+        public int PlayerEnemies;
+        public int TargetEnemies;
+        public int ClTotal;
+        public int FnTotal;
+
+        // Proc (consumed from ProcState, never rebuilt)
+        public bool BL;
+        public bool EM;
+        public bool T10;
+        public bool TrinketProc;
+        public bool RacialProc;
+        public bool GlovesProc;
+        public bool PotionActive;
+        public bool Clearcasting;
+        public int ProcCount;
+        public float ProcScore;
+
+        public bool Valid;
+
+        public void Build(long fsmTick, ProcState ps, WoWUnit combatTarget, bool moving)
+        {
+            FSMTick = fsmTick;
+            Valid = true;
+
+            InCombat = wManager.Wow.ObjectManager.ObjectManager.Me.InCombat;
+            IsMoving = moving;
+            IsCasting = wManager.Wow.ObjectManager.ObjectManager.Me.IsCast;
+            IsChanneling = false; // WRobot 3.3.5a has no native channel detect
+            ManaPercent = (float)((wManager.Wow.ObjectManager.WoWPlayer)wManager.Wow.ObjectManager.ObjectManager.Me).ManaPercentage;
+            HealthPercent = (float)wManager.Wow.ObjectManager.ObjectManager.Me.HealthPercent;
+
+            HasTarget = combatTarget != null;
+            if (HasTarget)
+            {
+                TargetAlive = combatTarget.IsAlive;
+                TargetAttackable = ((wManager.Wow.ObjectManager.WoWObject)combatTarget).IsValid && combatTarget.IsAlive;
+                TargetGuid = ((wManager.Wow.ObjectManager.WoWObject)combatTarget).Guid;
+                TargetName = ((wManager.Wow.ObjectManager.WoWObject)combatTarget).Name ?? "unknown";
+            }
+            else
+            {
+                TargetAlive = false;
+                TargetAttackable = false;
+                TargetGuid = 0;
+                TargetName = "none";
+            }
+
+            // AOE counts injected by caller (already computed)
+            PlayerEnemies = 0;
+            TargetEnemies = 0;
+            ClTotal = 0;
+            FnTotal = 0;
+
+            // Proc state — single source of truth from #22
+            BL = ps.HasBloodlust;
+            EM = ps.HasElementalMastery;
+            T10 = ps.Has4T10;
+            TrinketProc = ps.HasTrinketProc;
+            RacialProc = ps.HasRacial;
+            GlovesProc = ps.HasEngGloves;
+            PotionActive = ps.HasPotionActive;
+            Clearcasting = ps.HasClearcasting;
+            ProcCount = ps.ActiveProcsCount;
+            ProcScore = ps.SnapshotScore;
+        }
+    }
+
 	private struct HealthSample
 	{
 		public uint Time;
@@ -2255,6 +2343,8 @@ internal class Main : ICustomClass
     }
     private ProcState _procState;
     private long _lastProcHash = -1;
+    private CombatSnapshot _combatSnapshot;
+    private long _lastSnapshotHash = -1;
     private void FSM_Tick()
     {
         _procState.Update();
@@ -2266,6 +2356,16 @@ internal class Main : ICustomClass
             _lastProcHash = currentProcHash;
         }
         _fsmTickId++;
+        // Build canonical CombatSnapshot (#23) — partial (target injected in State_CoreRotation)
+        bool _snapMoving = wManager.Wow.Helpers.MovementManager.InMovement || ((wManager.Wow.ObjectManager.WoWPlayer)wManager.Wow.ObjectManager.ObjectManager.Me).GetMove;
+        _combatSnapshot.Build(_fsmTickId, _procState, null, _snapMoving);
+
+        long snapshotHash = (long)_combatSnapshot.ProcScore + (_combatSnapshot.ProcCount * 10000) + (_combatSnapshot.BL ? 1 : 0) + (_combatSnapshot.EM ? 2 : 0) + (_combatSnapshot.IsMoving ? 4 : 0) + ((long)(_combatSnapshot.ManaPercent) * 100000);
+        if (_lastSnapshotHash != snapshotHash)
+        {
+            FTLine("[SNAPSHOT] FSMTick=" + _fsmTickId + " VALID=" + _combatSnapshot.Valid + " MOVING=" + _combatSnapshot.IsMoving + " MANA=" + _combatSnapshot.ManaPercent.ToString("0.0") + "% COMBAT=" + _combatSnapshot.InCombat + " PROC_SCORE=" + _combatSnapshot.ProcScore + " BL=" + _combatSnapshot.BL + " EM=" + _combatSnapshot.EM + " T10=" + _combatSnapshot.T10 + " TRINKET=" + _combatSnapshot.TrinketProc + " RACIAL=" + _combatSnapshot.RacialProc);
+            _lastSnapshotHash = snapshotHash;
+        }
         _policyValid = false;
         long traceId = _traceTick + 1;
         FT("============================================================");
@@ -3736,6 +3836,8 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
         }
         
         bool moving = MovementManager.InMovement || ((wManager.Wow.ObjectManager.WoWPlayer)ObjectManager.Me).GetMove;
+        // Update canonical CombatSnapshot with target + moving (Task #23)
+        _combatSnapshot.Build(_fsmTickId, _procState, combatTarget, moving);
         // EMERGENCY SELF HEAL (From AIO)
         if (ObjectManager.Me.HealthPercent < 50)
         {
