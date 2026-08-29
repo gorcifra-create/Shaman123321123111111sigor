@@ -2387,9 +2387,15 @@ internal class Main : ICustomClass
     private bool _resolverTraced = false;
 
 		private static Dictionary<uint, string> _fastCastNames = new Dictionary<uint, string>();
+		private static Dictionary<uint, uint> _fastCastThrottle = new Dictionary<uint, uint>();
 		private static void FastCastById(uint spellId)
 		{
 			if (spellId == 0) return;
+			
+			uint now = (uint)Environment.TickCount;
+			if (_fastCastThrottle.ContainsKey(spellId) && (now - _fastCastThrottle[spellId]) < 200) return;
+			_fastCastThrottle[spellId] = now;
+			
 			if (!_fastCastNames.ContainsKey(spellId))
 			{
 				_fastCastNames[spellId] = Lua.LuaDoString<string>("return GetSpellInfo(" + spellId + ") or ''", "");
@@ -2458,7 +2464,19 @@ internal class Main : ICustomClass
         // FTLine("FSMTick=" + _fsmTickId); removed to prevent GUI freeze
         FTLine("COMBAT=" + inCombat);
         FTLine("ENGINE=" + ObjectManager.Me.InCombatFlagOnly);
-        WoWUnit currentTarget = ObjectManager.Target;
+        
+		// MACHINE GUN QUEUE GUARD
+		if (ObjectManager.Me.IsCast)
+		{
+			float timeLeft = Lua.LuaDoString<float>("local name, _, _, _, _, endTime = UnitCastingInfo('player'); if name then return (endTime/1000 - GetTime()); end local name2, _, _, _, _, endTime2 = UnitChannelInfo('player'); if name2 then return (endTime2/1000 - GetTime()); end return 0;", "");
+			if (timeLeft > 0.4f)
+			{
+				FTLine("[YIELD] METHOD=State_CoreRotation_Ele REASON=CastingTimeLeft_" + timeLeft.ToString("0.0"));
+				return;
+			}
+		}
+		
+		WoWUnit currentTarget = ObjectManager.Target;
         FTLine("TARGET_VALID=" + (currentTarget != null && currentTarget.IsValid));
         FTLine("TARGET_ALIVE=" + (currentTarget != null && currentTarget.IsAlive));
         FTLine("TARGET_ATTACKABLE=" + (currentTarget != null && currentTarget.IsAttackable));
@@ -3900,7 +3918,19 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
         // if (ObjectManager.Me.IsCast) removed for MACHINE GUN
 			FTLine("[YIELD] METHOD=State_CoreRotation_Ele REASON=Casting"); // return; } removed for MACHINE GUN
         
-        WoWUnit currentTarget = ObjectManager.Target;
+        
+		// MACHINE GUN QUEUE GUARD
+		if (ObjectManager.Me.IsCast)
+		{
+			float timeLeft = Lua.LuaDoString<float>("local name, _, _, _, _, endTime = UnitCastingInfo('player'); if name then return (endTime/1000 - GetTime()); end local name2, _, _, _, _, endTime2 = UnitChannelInfo('player'); if name2 then return (endTime2/1000 - GetTime()); end return 0;", "");
+			if (timeLeft > 0.4f)
+			{
+				FTLine("[YIELD] METHOD=State_CoreRotation_Ele REASON=CastingTimeLeft_" + timeLeft.ToString("0.0"));
+				return;
+			}
+		}
+		
+		WoWUnit currentTarget = ObjectManager.Target;
         WoWUnit combatTarget = GetCombatTarget(30f);
         
         if (combatTarget == null)
@@ -4321,6 +4351,18 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
 	{
 		//IL_00ac: Unknown result type (might be due to invalid IL or missing references)
 		//IL_00b6: Expected O, but got Unknown
+		
+		// MACHINE GUN QUEUE GUARD
+		if (ObjectManager.Me.IsCast)
+		{
+			float timeLeft = Lua.LuaDoString<float>("local name, _, _, _, _, endTime = UnitCastingInfo('player'); if name then return (endTime/1000 - GetTime()); end local name2, _, _, _, _, endTime2 = UnitChannelInfo('player'); if name2 then return (endTime2/1000 - GetTime()); end return 0;", "");
+			if (timeLeft > 0.4f)
+			{
+				FTLine("[YIELD] METHOD=State_CoreRotation_Resto REASON=CastingTimeLeft_" + timeLeft.ToString("0.0"));
+				return false;
+			}
+		}
+		
 		List<WoWUnit> list = ObjectManager.GetObjectWoWPlayer().Where(delegate(WoWPlayer u)
 		{
 			//IL_000a: Unknown result type (might be due to invalid IL or missing references)
