@@ -2901,7 +2901,7 @@ internal class Main : ICustomClass
                         FTLine("[WIND SHEAR CAST] FSMTick=" + _fsmTickId + " TARGET=" + combatTarget.Name + " SPELL=" + spellName + " REASON=Interrupt");
                         SpellManager.CastSpellByIdLUA(num);
                         Logging.Write("[REACT] Wind Shear (" + num + ") on " + spellName);
-                        AddExpectedState("WindShear", 1500);
+                        AddExpectedState("WindShear", 500);
                         return true;
                     }
                 }
@@ -2938,7 +2938,7 @@ internal class Main : ICustomClass
 								return true;
 							}
 							SpellManager.CastSpellByIdLUA(ResolveSpell("cleanse_spirit"));
-							AddExpectedState("Cleanse", 1500);
+							AddExpectedState("Cleanse", 500);
 							return true;
 						}
 					}
@@ -2952,7 +2952,7 @@ internal class Main : ICustomClass
 								return true;
 							}
 							SpellManager.CastSpellByIdLUA(ResolveSpell("cleanse_spirit"));
-							AddExpectedState("Cleanse", 1500);
+							AddExpectedState("Cleanse", 500);
 							return true;
 						}
 					}
@@ -2964,7 +2964,7 @@ internal class Main : ICustomClass
 							return true;
 						}
 						SpellManager.CastSpellByIdLUA(ResolveSpell("cure_disease"));
-						AddExpectedState("Cure", 1500);
+						AddExpectedState("Cure", 500);
 						return true;
 					}
 				}
@@ -3018,7 +3018,7 @@ internal class Main : ICustomClass
                     FTLine("[PURGE CAST] FSMTick=" + _fsmTickId + " TARGET=" + combatTarget.Name + " AURA=" + auraName + " AURA_TYPE=" + auraType + " REASON=Beneficial Magic");
                     SpellManager.CastSpellByIdLUA(num);
                     Logging.Write("[REACT] Purge (" + num + ") on " + auraName);
-                    AddExpectedState("Purge", 1500); // Anti-spam
+                    AddExpectedState("Purge", 500); // Anti-spam
                     return true;
                 }
                 else
@@ -3514,6 +3514,7 @@ internal class Main : ICustomClass
             {
                 decision = "VERIFIED";
                 reason = "Base totems intact";
+				_nextTotemVerifyTime = (uint)Environment.TickCount + 2000;
             }
         }
 
@@ -3522,6 +3523,7 @@ internal class Main : ICustomClass
             if (baseVerified)
             {
                 _totemState = TotemPresetState.Verified;
+				_nextTotemVerifyTime = (uint)Environment.TickCount + 2000;
                 _callFailCount = 0;
                 _lastRestoreAction = TotemRestoreAction.NONE;
                 decision = "STATE TRANSITION";
@@ -3765,7 +3767,7 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
                     FTLine("[SHIELD CAST] FSMTick=" + _fsmTickId + " TYPE=" + desiredShield + " REASON=Refresh");
                     
                     SpellManager.CastSpellByIdLUA(shieldSpellId);
-                    AddExpectedState("Shield", 1500);
+                    AddExpectedState("Shield", 500);
                     FTLine("[RETURN TRACE] FSMTick=" + _fsmTickId + " METHOD=State_BuffsAndTotems RETURN=True REASON=Shield ACTION=Cast NEXT_EXPECTED=FSM_End");
 			FTLine("[YIELD] FSMTick=" + _fsmTickId + " METHOD=State_BuffsAndTotems REASON=Cast NEXT_TICK=" + (_fsmTickId + 1));
                     return true;
@@ -3977,7 +3979,7 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
         {
             FTLine("[THUNDERSTORM MANA OVERRIDE] MANA=" + ObjectManager.Me.ManaPercentage + " THRESHOLD=" + c.Ele.ThunderstormMana + " CD=" + tsPri0Cd.ToString("0") + "ms");
             SpellManager.CastSpellByIdLUA(tsPri0Id);
-            AddExpectedState("Thunderstorm_Attempt", 1500); // Instant cast, GCD + latency
+            AddExpectedState("Thunderstorm_Attempt", 500); // Instant cast, GCD + latency
             FTLine("[RETURN TRACE] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Ele RETURN=Void REASON=ThunderstormMana ACTION=Cast NEXT_EXPECTED=FSM_End");
 			FTLine("[YIELD] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Ele REASON=Cast NEXT_TICK=" + (_fsmTickId + 1));
             return;
@@ -4014,7 +4016,7 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
 		{
 			FTLine("[FLAME SHOCK CAST] Target=" + combatTarget.Name + " REASON=" + (!hasFs ? "Missing" : "Refresh Window"));
 			SpellManager.CastSpellByIdLUA(fsId);
-			AddExpectedState("FlameShock_Attempt", 1500); // 1.5s Anti-Spam protection
+			AddExpectedState("FlameShock_Attempt", 500); // 1.5s Anti-Spam protection
 			FTLine("[RETURN TRACE] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Ele RETURN=Void REASON=FlameShock ACTION=Cast NEXT_EXPECTED=FSM_End");
 			FTLine("[YIELD] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Ele REASON=Cast NEXT_TICK=" + (_fsmTickId + 1));
 			return;
@@ -4040,7 +4042,7 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
         {
             FTLine("[LAVA BURST CAST] Target=" + combatTarget.Name + " REASON=Normal");
             SpellManager.CastSpellByIdLUA(lvbId);
-            AddExpectedState("LavaBurst_Attempt", 2500); // 2s cast + net latency
+            AddExpectedState("LavaBurst_Attempt", 500); // 2s cast + net latency
             FTLine("[RETURN TRACE] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Ele RETURN=Void REASON=LavaBurst ACTION=Cast NEXT_EXPECTED=FSM_End");
 			FTLine("[YIELD] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Ele REASON=Cast NEXT_TICK=" + (_fsmTickId + 1));
             return;
@@ -4130,7 +4132,7 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
         {
             FTLine("[FIRE NOVA CAST] FIRE_TOTEM=" + fireTotemName + " ENEMY_COUNT=" + fnTotalTargets + " REASON=AOE");
             SpellManager.CastSpellByIdLUA(fnId);
-            AddExpectedState("FireNova_Attempt", 1500); // Instant cast, GCD + latency
+            AddExpectedState("FireNova_Attempt", 500); // Instant cast, GCD + latency
             FTLine("[RETURN TRACE] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Ele RETURN=Void REASON=FireNova ACTION=Cast NEXT_EXPECTED=FSM_End");
 			FTLine("[YIELD] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Ele REASON=Cast NEXT_TICK=" + (_fsmTickId + 1));
             return;
@@ -4164,7 +4166,7 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
                 + " ENEMY_COUNT=" + clTotalTargets 
                 + " REASON=" + (clIsAoeEligible ? "AOE" : "ST"));
             SpellManager.CastSpellByIdLUA(clId);
-            AddExpectedState("ChainLightning_Attempt", 2500); // 2s cast base + latency
+            AddExpectedState("ChainLightning_Attempt", 500); // 2s cast base + latency
             FTLine("[RETURN TRACE] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Ele RETURN=Void REASON=ChainLightning ACTION=Cast NEXT_EXPECTED=FSM_End");
 			FTLine("[YIELD] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Ele REASON=Cast NEXT_TICK=" + (_fsmTickId + 1));
             return;
@@ -4205,7 +4207,7 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
             string tsReason = "AOE";
             FTLine("[THUNDERSTORM CAST] ENEMY_COUNT=" + tsTotalTargets + " MANA=" + ObjectManager.Me.ManaPercentage + " REASON=" + tsReason);
             SpellManager.CastSpellByIdLUA(tsId);
-            AddExpectedState("Thunderstorm_Attempt", 1500); // Instant cast, GCD + latency
+            AddExpectedState("Thunderstorm_Attempt", 500); // Instant cast, GCD + latency
             FTLine("[RETURN TRACE] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Ele RETURN=Void REASON=Thunderstorm ACTION=Cast NEXT_EXPECTED=FSM_End");
 			FTLine("[YIELD] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Ele REASON=Cast NEXT_TICK=" + (_fsmTickId + 1));
             return;
@@ -4229,7 +4231,7 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
         {
             FTLine("[LIGHTNING BOLT CAST] Target=" + combatTarget.Name + " REASON=Filler");
             SpellManager.CastSpellByIdLUA(lbId);
-            AddExpectedState("LightningBolt_Attempt", 2500); // 2.5s base (reduced by talents/haste) + latency
+            AddExpectedState("LightningBolt_Attempt", 500); // 2.5s base (reduced by talents/haste) + latency
             FTLine("[RETURN TRACE] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Ele RETURN=Void REASON=LightningBolt ACTION=Cast NEXT_EXPECTED=FSM_End");
 			FTLine("[YIELD] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Ele REASON=Cast NEXT_TICK=" + (_fsmTickId + 1));
             return;
@@ -4253,7 +4255,7 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
             {
                 FTLine("[EARTH SHOCK CAST] TARGET=" + combatTarget.Name + " MAELSTROM=NONE REASON=Movement");
                 SpellManager.CastSpellByIdLUA(esId);
-                AddExpectedState("EarthShock", 1500);
+                AddExpectedState("EarthShock", 500);
                 FTLine("[RETURN TRACE] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Ele RETURN=Void REASON=EarthShock ACTION=Cast NEXT_EXPECTED=FSM_End");
 			FTLine("[YIELD] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Ele REASON=Cast NEXT_TICK=" + (_fsmTickId + 1));
                 return;
@@ -4279,7 +4281,7 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
             {
                 FTLine("[FROST SHOCK CAST] TARGET=" + combatTarget.Name + " REASON=Movement");
                 SpellManager.CastSpellByIdLUA(frsId);
-                AddExpectedState("FrostShock", 1500);
+                AddExpectedState("FrostShock", 500);
                 FTLine("[RETURN TRACE] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Ele RETURN=Void REASON=FrostShock ACTION=Cast NEXT_EXPECTED=FSM_End");
 			FTLine("[YIELD] FSMTick=" + _fsmTickId + " METHOD=State_CoreRotation_Ele REASON=Cast NEXT_TICK=" + (_fsmTickId + 1));
                 return;
