@@ -3764,6 +3764,29 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
         }
         
 
+
+        // Frost Shock (Movement Fallback)
+        if (moving)
+        {
+            uint frsId = ResolveSpell("frost_shock");
+            float frsCd = frsId > 0 ? SpellManager.GetSpellCooldownTimeLeft(frsId) : -1f;
+            bool frsEligible = c.Ele.UseFrostShock && frsId > 0 && frsCd <= 0;
+            
+            FTLine("[FROST SHOCK] TARGET=" + combatTarget.Name + " MOVING=" + moving + " FRS_COOLDOWN=" + frsCd + " ELIGIBLE=" + frsEligible);
+            
+            if (frsEligible)
+            {
+                FTLine("[FROST SHOCK CAST] TARGET=" + combatTarget.Name + " REASON=Movement");
+                SpellManager.CastSpellByIdLUA(frsId);
+                AddExpectedState("FrostShock", 1500);
+                FTLine("RETURN TRUE: ELE.FrostShock");
+                return;
+            }
+            else
+            {
+                FTLine("[FROST SHOCK BLOCK] REASON=" + (!c.Ele.UseFrostShock ? "Disabled" : "Cooldown"));
+            }
+        }
         FTLine("RESULT = NO SPELL CAST");
     }
 
