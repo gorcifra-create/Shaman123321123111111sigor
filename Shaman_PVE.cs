@@ -3578,18 +3578,48 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
             + " THRESHOLD=" + aoeThreshold);
 
         // ---------------------------------------------------------
+        // ---------------------------------------------------------
         // Priority 3: Fire Nova (AOE)
         // ---------------------------------------------------------
-        if (fnTotalTargets >= aoeThreshold)
+        uint fnId = ResolveSpell("fire_nova");
+        bool fnKnown = fnId > 0;
+        float fnCd = fnKnown ? SpellManager.GetSpellCooldownTimeLeft(fnId) : -1f;
+
+        bool hasFireTotem = false;
+        string fireTotemName = "None";
+        if (fnKnown)
         {
-            uint fnId = ResolveSpell("fire_nova");
-            if (fnId > 0 && SpellManager.GetSpellCooldownTimeLeft(fnId) <= 0)
-            {
-                FTLine("ACTION CAST Fire Nova (AoE)");
-                SpellManager.CastSpellByIdLUA(fnId);
-                FTLine("RETURN TRUE: ELE.FireNova");
-                return;
+            hasFireTotem = Lua.LuaDoString<bool>("local have, name, start, dur = GetTotemInfo(1); return have and name ~= nil and name ~= '' and dur > 0;", "");
+            if (hasFireTotem) {
+                fireTotemName = Lua.LuaDoString<string>("local have, name = GetTotemInfo(1); return name or 'Unknown';", "");
             }
+        }
+        
+        bool fnAoeEligible = (fnTotalTargets >= aoeThreshold);
+        bool isFnBlocked = HasExpectedState("FireNova_Attempt");
+        
+        bool fnEligible = fnKnown && fnCd <= 0 && hasFireTotem && fnAoeEligible && !isFnBlocked;
+
+        if (fnKnown || fnTotalTargets >= aoeThreshold)
+        {
+            FTLine("[FIRE NOVA] FIRE_TOTEM=" + hasFireTotem + " (" + fireTotemName + ")"
+                + " PLAYER_ENEMIES=" + fnTotalTargets + " THRESHOLD=" + aoeThreshold
+                + " CD=" + fnCd.ToString("0") + "ms"
+                + " Eligible=" + fnEligible + " Blocked=" + isFnBlocked);
+        }
+
+        if (fnEligible)
+        {
+            FTLine("[FIRE NOVA CAST] FIRE_TOTEM=" + fireTotemName + " ENEMY_COUNT=" + fnTotalTargets + " REASON=AOE");
+            SpellManager.CastSpellByIdLUA(fnId);
+            AddExpectedState("FireNova_Attempt", 1500); // Instant cast, GCD + latency
+            FTLine("RETURN TRUE: ELE.FireNova");
+            return;
+        }
+        else if (fnKnown && fnTotalTargets >= aoeThreshold && fnCd <= 0 && !isFnBlocked)
+        {
+            string fnReason = !hasFireTotem ? "NoFireTotem" : "Unknown";
+            FTLine("[FIRE NOVA BLOCK] REASON=" + fnReason);
         }
         // Priority 4: Chain Lightning (AOE or ST)
         // ---------------------------------------------------------
