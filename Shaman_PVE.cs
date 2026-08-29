@@ -3916,7 +3916,7 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
     {
         FTLine("[ELE FULL] State_CoreRotation_Ele");
         // if (ObjectManager.Me.IsCast) removed for MACHINE GUN
-			FTLine("[YIELD] METHOD=State_CoreRotation_Ele REASON=Casting"); // return; } removed for MACHINE GUN
+			
         
         
 		// MACHINE GUN QUEUE GUARD
