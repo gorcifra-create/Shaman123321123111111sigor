@@ -46,7 +46,19 @@ internal class Main : ICustomClass
 
 		public bool HasFlameShock;
 
-		public bool HasLightningBolt;
+		public bool HasLightningBolt;    public bool HasEarthShock;
+    public bool HasWindShear;
+    public bool HasPurge;
+    public bool HasFrostShock;
+    public bool HasLesserHealingWave;
+    public bool HasCureToxins;
+    public bool HasWaterShield;
+    public bool HasLightningShield;
+    public bool HasRiptide;
+    public bool HasWindfuryWeapon;
+    public bool HasFlametongueWeapon;
+    public bool HasEarthlivingWeapon;
+
 
 		public void Update(Main m)
 		{
@@ -60,7 +72,19 @@ internal class Main : ICustomClass
 			HasChainLightning = m.ResolveSpell("chain_lightning") != 0;
 			HasLavaBurst = m.ResolveSpell("lava_burst") != 0;
 			HasFlameShock = m.ResolveSpell("flame_shock") != 0;
-			HasLightningBolt = m.ResolveSpell("lightning_bolt") != 0;
+			HasLightningBolt = m.ResolveSpell("lightning_bolt") != 0;        HasEarthShock = m.ResolveSpell("earth_shock") != 0;
+        HasWindShear = m.ResolveSpell("wind_shear") != 0;
+        HasPurge = m.ResolveSpell("purge") != 0;
+        HasFrostShock = m.ResolveSpell("frost_shock") != 0;
+        HasLesserHealingWave = m.ResolveSpell("lesser_healing_wave") != 0;
+        HasCureToxins = m.ResolveSpell("cure_toxins") != 0;
+        HasWaterShield = m.ResolveSpell("water_shield") != 0;
+        HasLightningShield = m.ResolveSpell("lightning_shield") != 0;
+        HasRiptide = m.ResolveSpell("riptide") != 0;
+        HasWindfuryWeapon = m.ResolveSpell("windfury_weapon") != 0;
+        HasFlametongueWeapon = m.ResolveSpell("flametongue_weapon") != 0;
+        HasEarthlivingWeapon = m.ResolveSpell("earthliving_weapon") != 0;
+
 		}
 	}
 
@@ -2345,8 +2369,16 @@ internal class Main : ICustomClass
     private long _lastProcHash = -1;
     private CombatSnapshot _combatSnapshot;
     private long _lastSnapshotHash = -1;
+    private long _lastCapsHash = -1;
     private void FSM_Tick()
     {
+        _caps.Update(this);
+        long capsHash = (_caps.HasLavaBurst ? 1 : 0) + (_caps.HasLightningBolt ? 2 : 0) + (_caps.HasChainLightning ? 4 : 0) + (_caps.HasFlameShock ? 8 : 0) + (_caps.HasFireNova ? 16 : 0) + (_caps.HasThunderstorm ? 32 : 0) + (_caps.HasFireElemental ? 64 : 0) + (_caps.HasElementalMastery ? 128 : 0) + (_caps.Has4T10 ? 256 : 0) + (_caps.HasGlyphFlameShock ? 512 : 0) + (_caps.HasEarthShock ? 1024 : 0) + (_caps.HasWindShear ? 2048 : 0) + (_caps.HasPurge ? 4096 : 0);
+        if (_lastCapsHash != capsHash)
+        {
+            FTLine("[CAPABILITY] FSMTick=" + _fsmTickId + " LvB=" + _caps.HasLavaBurst + " LB=" + _caps.HasLightningBolt + " CL=" + _caps.HasChainLightning + " FS=" + _caps.HasFlameShock + " FN=" + _caps.HasFireNova + " TS=" + _caps.HasThunderstorm + " FE=" + _caps.HasFireElemental + " EM=" + _caps.HasElementalMastery + " 4T10=" + _caps.Has4T10 + " ES=" + _caps.HasEarthShock + " WS=" + _caps.HasWindShear + " Purge=" + _caps.HasPurge);
+            _lastCapsHash = capsHash;
+        }
         _procState.Update();
 
         long currentProcHash = (long)_procState.SnapshotScore + (_procState.ActiveProcsCount * 10000) + (_procState.HasBloodlust ? 100000 : 0) + (_procState.HasElementalMastery ? 200000 : 0) + (_procState.Has4T10 ? 400000 : 0) + (_procState.HasTrinketProc ? 800000 : 0) + (_procState.HasRacial ? 1600000 : 0) + (_procState.HasEngGloves ? 3200000 : 0);
@@ -4115,7 +4147,7 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
         // ---------------------------------------------------------
         // Priority 5: Thunderstorm (AOE / MANA)
         // ---------------------------------------------------------
-        uint tsId = ResolveSpell("thunderstorm");
+        uint tsId = tsPri0Id; // Task #24: dedup - already resolved above
         bool tsKnown = tsId > 0;
         float tsCd = tsKnown ? SpellManager.GetSpellCooldownTimeLeft(tsId) : -1f;
 
