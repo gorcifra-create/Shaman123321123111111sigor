@@ -3370,6 +3370,43 @@ public class Main : ICustomClass
     private bool _wasMoving = false;
 
 
+
+    private void GetShieldState(uint desiredSpellId, out bool hasShield, out int charges, out int remainingMs)
+    {
+        hasShield = false;
+        charges = 0;
+        remainingMs = 0;
+        
+        if (desiredSpellId == 0) return;
+        
+        string lua = @"
+            local name = GetSpellInfo(" + desiredSpellId + @")
+            if not name then return 'false^0^0' end
+            
+            local bName, _, _, count, _, duration, expirationTime = UnitBuff('player', name)
+            if not bName then return 'false^0^0' end
+            
+            local remain = 0
+            if expirationTime and expirationTime > 0 then
+                remain = (expirationTime - GetTime()) * 1000
+            else
+                remain = 600000 -- Fallback to 10 min if no expiration
+            end
+            
+            return 'true^' .. (count or 0) .. '^' .. math.floor(remain)
+        ";
+        
+        string result = Lua.LuaDoString<string>(lua, "");
+        if (string.IsNullOrEmpty(result)) return;
+        
+        string[] parts = result.Split('^');
+        if (parts.Length >= 3)
+        {
+            hasShield = (parts[0] == "true");
+            int.TryParse(parts[1], out charges);
+            int.TryParse(parts[2], out remainingMs);
+        }
+    }
     private void GetMainHandEnchantState(out string currentEnchant, out int remainingMs)
     {
         currentEnchant = "none";
@@ -3440,22 +3477,35 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
 				return true;
 			}
 		}
-		string text = (isResto ? c.Resto.ActiveShield : c.Ele.ActiveShield);
-		FTLine("CHECK Shield: " + text);
-		if (!string.IsNullOrEmpty(text) && !HasExpectedState("Shield"))
-		{
-			uint num2 = ResolveSpell(text);
-			bool flag2 = Lua.LuaDoString<bool>("return UnitBuff('player', GetSpellInfo(" + num2 + ")) ~= nil;", "");
-			FTLine("sId=" + num2 + " hasShield=" + flag2);
-			if (num2 != 0 && !flag2)
-			{
-				FTLine("ACTION CAST Shield " + num2);
-				SpellManager.CastSpellByIdLUA(num2);
-				AddExpectedState("Shield", 1500);
-				FTLine("RETURN TRUE: Buffs.Shield");
-				return true;
-			}
-		}
+
+        string desiredShield = (isResto ? c.Resto.ActiveShield : c.Ele.ActiveShield);
+        
+        if (!string.IsNullOrEmpty(desiredShield) && desiredShield != "None" && !inMovement)
+        {
+            uint shieldSpellId = ResolveSpell(desiredShield);
+            if (shieldSpellId != 0 && !HasExpectedState("Shield") && SpellManager.GetSpellCooldownTimeLeft(shieldSpellId) <= 0)
+            {
+                bool hasShield;
+                int charges;
+                int remainingMs;
+                GetShieldState(shieldSpellId, out hasShield, out charges, out remainingMs);
+                
+                bool isMissing = !hasShield;
+                bool isOOC = !((WoWUnit)ObjectManager.Me).InCombatFlagOnly;
+                bool needsRefreshOOC = isOOC && hasShield && (charges < 3 || remainingMs < 300000); // Refresh if < 3 charges or < 5 min OOC
+                
+                if (isMissing || needsRefreshOOC)
+                {
+                    FTLine("[SHIELD] FSMTick=" + _fsmTickId + " DESIRED=" + desiredShield + " CURRENT=" + (hasShield ? "True" : "False") + " CHARGES=" + charges + " REMAINING=" + remainingMs + "ms REASON=" + (isMissing ? "Missing" : "OOC_Refresh"));
+                    FTLine("[SHIELD CAST] FSMTick=" + _fsmTickId + " TYPE=" + desiredShield + " REASON=Refresh");
+                    
+                    SpellManager.CastSpellByIdLUA(shieldSpellId);
+                    AddExpectedState("Shield", 1500);
+                    FTLine("RETURN TRUE: Buffs.Shield");
+                    return true;
+                }
+            }
+        }
 
         string desiredWeaponEnchant = (isResto ? c.Resto.ActiveWeapon : c.Ele.ActiveWeapon);
         
