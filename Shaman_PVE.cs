@@ -3368,6 +3368,44 @@ public class Main : ICustomClass
     private string _lastTotemTrace = "";
     private uint _nextTotemVerifyTime = 0;
     private bool _wasMoving = false;
+
+    private void GetMainHandEnchantState(out string currentEnchant, out int remainingMs)
+    {
+        currentEnchant = "none";
+        remainingMs = 0;
+        
+        string lua = @"
+            local hasItem = GetInventoryItemID('player', 16)
+            if not hasItem then return 'no_weapon^0' end
+            
+            local h, expr, _, id = GetWeaponEnchantInfo()
+            if not h then return 'none^0' end
+            
+            expr = expr or 0
+            local n = 'unknown'
+            
+            local t = {
+                [283]='windfury_weapon', [284]='windfury_weapon', [525]='windfury_weapon', [1669]='windfury_weapon', [2636]='windfury_weapon', [3785]='windfury_weapon', [3786]='windfury_weapon', [3787]='windfury_weapon',
+                [3]='flametongue_weapon', [4]='flametongue_weapon', [5]='flametongue_weapon', [523]='flametongue_weapon', [1665]='flametongue_weapon', [1666]='flametongue_weapon', [2634]='flametongue_weapon', [3779]='flametongue_weapon', [3780]='flametongue_weapon', [3781]='flametongue_weapon',
+                [3345]='earthliving_weapon', [3346]='earthliving_weapon', [3347]='earthliving_weapon', [3348]='earthliving_weapon', [3349]='earthliving_weapon', [3350]='earthliving_weapon',
+                [2]='frostbrand_weapon', [12]='frostbrand_weapon', [524]='frostbrand_weapon', [1667]='frostbrand_weapon', [1668]='frostbrand_weapon', [2635]='frostbrand_weapon', [3782]='frostbrand_weapon', [3783]='frostbrand_weapon', [3784]='frostbrand_weapon',
+                [1]='rockbiter_weapon', [6]='rockbiter_weapon', [29]='rockbiter_weapon', [503]='rockbiter_weapon', [1663]='rockbiter_weapon', [1664]='rockbiter_weapon', [2632]='rockbiter_weapon', [2633]='rockbiter_weapon', [3018]='rockbiter_weapon'
+            }
+            if t[id] then n = t[id] end
+            
+            return n .. '^' .. expr
+        ";
+        
+        string result = Lua.LuaDoString<string>(lua, "");
+        if (string.IsNullOrEmpty(result)) return;
+        
+        string[] parts = result.Split('^');
+        if (parts.Length == 2)
+        {
+            currentEnchant = parts[0];
+            int.TryParse(parts[1], out remainingMs);
+        }
+    }
 private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
 	{
 		FT("[BUFFS FULL] State_BuffsAndTotems");
@@ -3406,27 +3444,42 @@ private bool State_BuffsAndTotems(ConfigCache c, bool isResto)
 				return true;
 			}
 		}
-		string text2 = (isResto ? c.Resto.ActiveWeapon : c.Ele.ActiveWeapon);
-		FTLine("CHECK Weapon: " + text2);
-		if (!string.IsNullOrEmpty(text2) && !inMovement)
-		{
-			uint num3 = ResolveSpell(text2);
-			FTLine("wepId=" + num3 + " expected=" + HasExpectedState("Weapon"));
-			if (num3 != 0 && !HasExpectedState("Weapon"))
-			{
-				bool flag3 = Lua.LuaDoString<bool>("local h = GetWeaponEnchantInfo(); return h == true or h == 1;", "");
-				float num4 = SpellManager.GetSpellCooldownTimeLeft(num3);
-				FTLine("hasAnyWep=" + flag3 + " cd=" + num4);
-				if (!flag3 && num4 <= 0f)
-				{
-					FTLine("ACTION CAST Weapon " + num3);
-					SpellManager.CastSpellByIdLUA(num3);
-					AddExpectedState("Weapon", 3000);
-					FTLine("RETURN TRUE: Buffs.Weapon");
-					return true;
-				}
-			}
-		}
+
+        string desiredWeaponEnchant = (isResto ? c.Resto.ActiveWeapon : c.Ele.ActiveWeapon);
+        
+        if (!string.IsNullOrEmpty(desiredWeaponEnchant) && desiredWeaponEnchant != "None" && !inMovement)
+        {
+            uint wepSpellId = ResolveSpell(desiredWeaponEnchant);
+            if (wepSpellId != 0 && !HasExpectedState("Weapon") && SpellManager.GetSpellCooldownTimeLeft(wepSpellId) <= 0)
+            {
+                string currentEnchant;
+                int remainingMs;
+                GetMainHandEnchantState(out currentEnchant, out remainingMs);
+                
+                if (currentEnchant != "no_weapon")
+                {
+                    bool isMissing = (currentEnchant == "none");
+                    bool isWrong = (!isMissing && currentEnchant != "unknown" && currentEnchant != desiredWeaponEnchant);
+                    bool isExpiring = (!isMissing && !isWrong && remainingMs < 300000); // 5 minutes refresh
+                    
+                    if (isMissing || isWrong || isExpiring)
+                    {
+                        FTLine("[WEAPON ENCHANT] FSMTick=" + _fsmTickId + " HAND=Main CURRENT_ENCHANT=" + currentEnchant + " DESIRED_ENCHANT=" + desiredWeaponEnchant + " REMAINING=" + remainingMs + "ms REASON=" + (isMissing ? "Missing" : (isWrong ? "Wrong" : "Expiring")));
+                        FTLine("[WEAPON ENCHANT CAST] FSMTick=" + _fsmTickId + " HAND=Main DESIRED=" + desiredWeaponEnchant + " REASON=Refresh");
+                        
+                        SpellManager.CastSpellByIdLUA(wepSpellId);
+                        AddExpectedState("Weapon", 3000); // Prevent double cast same tick
+                        FTLine("RETURN TRUE: Buffs.Weapon");
+                        return true;
+                    }
+                }
+                else
+                {
+                    // Silent block: no weapon equipped
+                }
+            }
+        }
+
 		if (inCombatFlagOnly && !inMovement)
 		{
 			FTLine("CHECK Saronite Bomb");
